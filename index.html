@@ -390,6 +390,18 @@
     supabaseLoadError = true;
   }
 </script>
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.12.0/mammoth.browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.min.js"></script>
+<script>
+  let pdfjsReady = false;
+  try {
+    if (typeof pdfjsLib !== 'undefined') {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.js';
+      pdfjsReady = true;
+    }
+  } catch (e) { pdfjsReady = false; }
+  const mammothReady = typeof mammoth !== 'undefined';
+</script>
 </head>
 <body>
 
@@ -1779,6 +1791,12 @@ TAMAT`
       html += '<div class="form-field"><label>Penulis</label><input type="text" id="newBookAuthor" placeholder="Nama penulis"></div>';
       html += '<div class="form-field"><label>Bahasa</label><select id="newBookLang"><option value="BM">Bahasa Melayu</option><option value="BI">Bahasa Inggeris</option></select></div>';
       html += '<div class="form-field"><label>Emoji (pilihan)</label><input type="text" id="newBookEmoji" placeholder="📘" maxlength="4"></div>';
+      html += '<div class="form-field">';
+      html += '  <label>Muat naik fail (pilihan)</label>';
+      html += '  <label class="btn-lang" style="display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer;">📄 Pilih fail .docx atau .pdf<input type="file" accept=".docx,.pdf" style="display:none;" onchange="handleBookFileUpload(event)"></label>';
+      html += '  <div id="fileUploadStatus" style="font-size:12px; color:var(--muted); margin-top:6px;"></div>';
+      html += '  <div style="font-size:11.5px; color:var(--muted); margin-top:4px; line-height:1.5;">Bab dikesan automatik daripada tajuk seperti "Bab 1" atau "Chapter 1". PDF hasil imbasan (scan gambar) tidak boleh diekstrak.</div>';
+      html += '</div>';
       html += '<div id="chapterEditList"></div>';
       html += '<button type="button" class="btn-lang" onclick="addChapterField()">＋ Tambah Bab</button>';
       html += '<div class="modal-actions"><button type="button" class="btn-cancel" onclick="closeAppModal()">Batal</button><button type="button" class="btn-lang active" style="flex:1;" onclick="saveNewBook()">Simpan Buku</button></div>';
@@ -1805,6 +1823,118 @@ TAMAT`
     function removeChapterField(idx) {
       const block = document.getElementById('chapterBlock' + idx);
       if (block) block.remove();
+    }
+
+    // ==================== FILE UPLOAD (DOCX / PDF) ====================
+    async function handleBookFileUpload(e) {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      const statusEl = document.getElementById('fileUploadStatus');
+      const errEl = document.getElementById('addBookError');
+      if (errEl) errEl.innerHTML = '';
+      if (statusEl) statusEl.textContent = 'Membaca fail\u2026';
+
+      try {
+        let rawText;
+        const lower = file.name.toLowerCase();
+        if (lower.endsWith('.docx')) {
+          rawText = await extractTextFromDocx(file);
+        } else if (lower.endsWith('.pdf')) {
+          rawText = await extractTextFromPdf(file);
+        } else {
+          throw new Error('Format fail tidak disokong. Guna .docx atau .pdf sahaja.');
+        }
+
+        if (!rawText || !rawText.trim()) {
+          throw new Error('Tiada teks dijumpai dalam fail ini. Jika ini PDF hasil imbasan (scan), teks tidak dapat diekstrak automatik.');
+        }
+
+        const chapters = splitIntoChapters(rawText);
+        populateChapterFieldsFromExtraction(chapters);
+
+        // Try to guess a title from the filename if the title field is still empty
+        const titleInput = document.getElementById('newBookTitle');
+        if (titleInput && !titleInput.value.trim()) {
+          titleInput.value = file.name.replace(/\.(docx|pdf)$/i, '').replace(/[_-]+/g, ' ').trim();
+        }
+
+        if (statusEl) statusEl.textContent = '\u2713 ' + chapters.length + ' bab dikesan daripada "' + file.name + '". Sila semak di bawah sebelum simpan.';
+      } catch (err) {
+        if (statusEl) statusEl.textContent = '';
+        if (errEl) errEl.innerHTML = '<div class="form-error">' + escapeHtml(err.message || 'Gagal proses fail.') + '</div>';
+      }
+    }
+
+    async function extractTextFromDocx(file) {
+      if (!mammothReady) throw new Error('Perpustakaan pembaca DOCX gagal dimuat. Semak sambungan internet dan cuba lagi.');
+      const arrayBuffer = await file.arrayBuffer();
+      const result = await mammoth.extractRawText({ arrayBuffer });
+      return result.value;
+    }
+
+    async function extractTextFromPdf(file) {
+      if (!pdfjsReady) throw new Error('Perpustakaan pembaca PDF gagal dimuat. Semak sambungan internet dan cuba lagi.');
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = '';
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map(item => item.str).join(' ');
+        fullText += pageText + '\n\n';
+      }
+      return fullText;
+    }
+
+    // Detect lines like "Bab 1", "Bab 1: Tajuk", "Chapter 2", "CHAPTER 3 - Title" as chapter breaks.
+    // Falls back to a single chapter containing everything if no such headings are found.
+    function splitIntoChapters(rawText) {
+      const lines = rawText.replace(/\r\n/g, '\n').split('\n');
+      const chapterHeadingPattern = /^\s*(bab|chapter)\s+(\d+|[ivxlcdm]+)\b/i;
+
+      const chapters = [];
+      let current = null;
+      let sawAnyHeading = false;
+
+      lines.forEach(line => {
+        const trimmed = line.trim();
+        if (chapterHeadingPattern.test(trimmed) && trimmed.length < 100) {
+          if (current) chapters.push(current);
+          current = { title: trimmed, contentLines: [] };
+          sawAnyHeading = true;
+        } else if (current) {
+          current.contentLines.push(line);
+        } else {
+          // Text before any detected heading — label distinctly so it never collides with "Bab 1".
+          current = { title: 'Pengenalan', contentLines: [] };
+          current.contentLines.push(line);
+        }
+      });
+      if (current) chapters.push(current);
+
+      const result = chapters
+        .map(c => ({ title: c.title, content: c.contentLines.join('\n').replace(/\n{3,}/g, '\n\n').trim() }))
+        .filter(c => c.content.length > 0);
+
+      if (result.length === 0) {
+        // No headings detected anywhere — treat the whole document as one chapter.
+        return [{ title: 'Bab 1', content: rawText.trim() }];
+      }
+      return result;
+    }
+
+    function populateChapterFieldsFromExtraction(chapters) {
+      // Clear existing chapter fields and rebuild from the extracted list.
+      document.getElementById('chapterEditList').innerHTML = '';
+      addBookChapterCount = 0;
+      chapters.forEach(ch => {
+        addChapterField();
+        const idx = addBookChapterCount;
+        const block = document.getElementById('chapterBlock' + idx);
+        block.querySelector('.chapter-title-input').value = ch.title;
+        block.querySelector('.chapter-content-input').value = ch.content;
+      });
     }
 
     async function saveNewBook() {
