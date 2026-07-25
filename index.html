@@ -132,14 +132,24 @@
     display:flex; flex-direction:column;
     transition:background .35s, color .35s;
   }
-  /* dreamy ambient glow */
+  /* cheerful ambient glow — sits on <body> so it covers every page/view in the app */
   body::before{
-    content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    content:""; position:fixed; inset:-10%; pointer-events:none; z-index:0;
     background:
-      radial-gradient(circle at 15% 10%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 45%),
-      radial-gradient(circle at 90% 25%, color-mix(in srgb, var(--accent2) 12%, transparent), transparent 40%),
-      radial-gradient(circle at 50% 95%, color-mix(in srgb, var(--gold) 8%, transparent), transparent 40%);
+      radial-gradient(circle at 12% 12%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 42%),
+      radial-gradient(circle at 88% 18%, color-mix(in srgb, var(--accent2) 20%, transparent), transparent 40%),
+      radial-gradient(circle at 92% 62%, color-mix(in srgb, #ffb37a 22%, transparent), transparent 42%),
+      radial-gradient(circle at 8% 58%, color-mix(in srgb, #7fe0c4 20%, transparent), transparent 40%),
+      radial-gradient(circle at 45% 95%, color-mix(in srgb, #ff9ec4 18%, transparent), transparent 42%),
+      radial-gradient(circle at 55% 2%, color-mix(in srgb, #8fc7ff 16%, transparent), transparent 38%);
+    animation: driftGlow 26s ease-in-out infinite alternate;
   }
+  @keyframes driftGlow{
+    0%{ transform:translate(0,0) scale(1); }
+    50%{ transform:translate(-2%,1.5%) scale(1.04); }
+    100%{ transform:translate(2%,-1.5%) scale(1.02); }
+  }
+  @media (prefers-reduced-motion: reduce){ body::before{ animation:none !important; } }
 
   header{
     position:relative; z-index:2;
@@ -189,7 +199,18 @@
   @keyframes ptr-spin{ to{ transform:rotate(360deg); } }
 
   .app-menu-wrap{ position:relative; }
-  .app-dropdown-menu{ position:absolute; top:calc(100% + 8px); right:0; z-index:210; background:var(--panel); border:2px solid var(--ink); border-radius:14px; padding:8px; width:240px; box-shadow:6px 6px 0 var(--accent); }
+  @keyframes dropdownPopIn{
+    from{ opacity:0; transform:scale(0.9) translateY(-8px); }
+    to{ opacity:1; transform:scale(1) translateY(0); }
+  }
+  .app-dropdown-menu{
+    position:absolute; top:calc(100% + 10px); right:0; z-index:210;
+    background:var(--panel); border:2px solid var(--ink); border-radius:16px; padding:8px; width:240px;
+    box-shadow:6px 6px 0 var(--accent), 0 14px 32px rgba(0,0,0,0.20), 0 4px 12px rgba(0,0,0,0.12);
+    transform-origin:top right;
+    animation:dropdownPopIn 0.2s cubic-bezier(0.34,1.56,0.64,1) both;
+  }
+  @media (prefers-reduced-motion: reduce){ .app-dropdown-menu{ animation:none !important; } }
   .app-dropdown-item{ display:flex; align-items:center; gap:10px; width:100%; text-align:left; background:transparent; border:none; border-radius:10px; padding:10px 12px; font-size:13.5px; font-weight:600; color:var(--ink); cursor:pointer; font-family:var(--sans); }
   .app-dropdown-item:hover{ background:var(--accent-soft); }
   .app-dropdown-item .dd-icon{ font-size:15px; width:18px; text-align:center; flex-shrink:0; }
@@ -198,7 +219,6 @@
   .app-dropdown-lang-row{ display:flex; gap:6px; padding:2px 8px 8px; }
   .app-dropdown-lang-chip{ flex:1; text-align:center; padding:7px 4px; border-radius:8px; border:1.5px solid var(--line); background:transparent; font-size:11.5px; font-weight:700; color:var(--ink); cursor:pointer; font-family:var(--sans); }
   .app-dropdown-lang-chip.active{ background:var(--accent); color:#fff; border-color:var(--accent); }
-  .menu-overlay{ position:fixed; inset:0; z-index:0; background:transparent; }
 
   /* Theme picker modal — larger, tap-friendly swatches with visible labels */
   .theme-modal-grid{
@@ -519,7 +539,6 @@
 
 <footer>Ceritera &middot; Perpustakaan e-buku peribadi, jalan 100% dalam pelayar.</footer>
 </div>
-<div id="appMenuRoot"></div>
 <div id="modalRoot"></div>
 
 <script>
@@ -1435,21 +1454,24 @@ TAMAT`
       const wrap = document.getElementById('app-menu-wrap');
       const existingPanel = wrap && wrap.querySelector('.app-dropdown-menu');
       if (existingPanel) existingPanel.remove();
-      const overlayRoot = document.getElementById('appMenuRoot');
-      if (overlayRoot) overlayRoot.innerHTML = '';
     }
+
+    // Close the dropdown when clicking anywhere outside it — the header itself
+    // included, not just the general page body — since a fixed-overlay
+    // approach only catches clicks below the header's own stacking context
+    // and would miss clicks on the header bar.
+    document.addEventListener('click', function (e) {
+      if (!appMenuOpen) return;
+      const wrap = document.getElementById('app-menu-wrap');
+      if (wrap && !wrap.contains(e.target)) closeAppMenu();
+    });
 
     function renderAppMenu() {
       const wrap = document.getElementById('app-menu-wrap');
-      const overlayRoot = document.getElementById('appMenuRoot');
-      if (!wrap || !overlayRoot) return;
+      if (!wrap) return;
       const existingPanel = wrap.querySelector('.app-dropdown-menu');
       if (existingPanel) existingPanel.remove();
-      overlayRoot.innerHTML = '';
       if (!appMenuOpen) return;
-
-      // Transparent full-screen layer just to catch outside clicks and close the menu.
-      overlayRoot.innerHTML = '<div class="menu-overlay" onclick="closeAppMenu()"></div>';
 
       // The panel itself is anchored inside .app-menu-wrap (position:relative),
       // so it always sits correctly under the button regardless of header size.
