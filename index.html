@@ -2100,10 +2100,41 @@ TAMAT`
       for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         const page = await pdf.getPage(pageNum);
         const textContent = await page.getTextContent();
-        const pageText = textContent.items.map(item => item.str).join(' ');
-        fullText += pageText + '\n\n';
+        fullText += reconstructPageText(textContent.items) + '\n\n';
       }
       return fullText;
+    }
+
+    // pdf.js gives text fragments roughly in the order they appear in the PDF's
+    // internal content stream, NOT as ready-made lines/paragraphs. Naively joining
+    // every fragment with a single space (the old code) throws away every line break,
+    // so a whole page collapses into one run-on line and reads as "berterabur".
+    // Here we rebuild lines using each item's vertical position (transform[5]) and
+    // pdf.js's own hasEOL flag, then treat a bigger-than-normal vertical gap between
+    // lines as a paragraph break.
+    function reconstructPageText(items) {
+      let text = '';
+      let lastY = null;
+      let lastLineHeight = null;
+      for (const item of items) {
+        if (!item.str) {
+          if (item.hasEOL) { text += '\n'; lastY = null; }
+          continue;
+        }
+        const y = item.transform ? item.transform[5] : null;
+        const lineHeight = item.height || Math.abs(item.transform ? item.transform[0] : 0) || 10;
+        if (lastY !== null && y !== null && Math.abs(y - lastY) > 1) {
+          const gap = Math.abs(lastY - y);
+          text += (gap > (lastLineHeight || lineHeight) * 1.5) ? '\n\n' : '\n';
+        } else if (lastY !== null) {
+          text += ' ';
+        }
+        text += item.str;
+        lastY = y;
+        lastLineHeight = lineHeight;
+        if (item.hasEOL) { text += '\n'; lastY = null; }
+      }
+      return text.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
     }
 
     // Detect lines like "Bab 1", "Bab 1: Tajuk", "Chapter 2", "CHAPTER 3 - Title" as chapter breaks.
@@ -2112,16 +2143,45 @@ TAMAT`
       const lines = rawText.replace(/\r\n/g, '\n').split('\n');
       const chapterHeadingPattern = /^\s*(bab|chapter)\s+(\d+|[ivxlcdm]+)\b/i;
 
-      const chapters = [];
-      let current = null;
-      let sawAnyHeading = false;
-
-      lines.forEach(line => {
+      // Pass 1: find every line that LOOKS like a chapter heading.
+      const candidates = [];
+      lines.forEach((line, i) => {
         const trimmed = line.trim();
         if (chapterHeadingPattern.test(trimmed) && trimmed.length < 100) {
+          candidates.push(i);
+        }
+      });
+
+      // Pass 2: a real chapter has a substantial amount of prose before the next
+      // heading. A Table of Contents produces a run of headings each followed by
+      // almost nothing (blank lines, a short blurb, a page number) — those false
+      // positives are what previously created duplicate "Bab 1", "Bab 2"... entries
+      // ahead of the real chapters and made the chapter order look scrambled.
+      // We measure the content between each candidate and the next one, and only
+      // keep candidates that are followed by enough real text to be an actual chapter.
+      const MIN_CHAPTER_CHARS = 400;
+      const realHeadingIdx = new Set();
+      candidates.forEach((idx, k) => {
+        const end = (k + 1 < candidates.length) ? candidates[k + 1] : lines.length;
+        let len = 0;
+        for (let j = idx + 1; j < end; j++) len += lines[j].trim().length;
+        if (len >= MIN_CHAPTER_CHARS) realHeadingIdx.add(idx);
+      });
+      // Safety net: if the threshold filtered out every single candidate (e.g. a
+      // book with genuinely very short chapters), fall back to trusting all of them
+      // rather than silently collapsing the whole document into one chapter.
+      if (realHeadingIdx.size === 0 && candidates.length > 0) {
+        candidates.forEach(idx => realHeadingIdx.add(idx));
+      }
+
+      const chapters = [];
+      let current = null;
+
+      lines.forEach((line, i) => {
+        const trimmed = line.trim();
+        if (realHeadingIdx.has(i)) {
           if (current) chapters.push(current);
           current = { title: trimmed, contentLines: [] };
-          sawAnyHeading = true;
         } else if (current) {
           current.contentLines.push(line);
         } else {
