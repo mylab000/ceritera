@@ -408,14 +408,6 @@
     font-size:1.6rem; margin-bottom:8px; color:var(--ink);
   }
   #readerAuthor{ font-size:0.88rem; color:var(--muted); }
-  .chapter-heading{
-    font-family:var(--mono); font-size:0.68rem; letter-spacing:0.1em;
-    text-transform:uppercase; color:var(--accent); text-align:center;
-    margin-bottom:24px; display:flex; align-items:center; justify-content:center; gap:10px;
-  }
-  .chapter-heading::before, .chapter-heading::after{
-    content:""; height:1px; width:36px; background:var(--line);
-  }
   .chapter-indicator-wrap{ display:flex; justify-content:center; margin-bottom:18px; }
   .chapter-indicator-box{
     display:inline-flex; align-items:center; gap:10px;
@@ -570,7 +562,6 @@
       </div>
     </div>
 
-    <div class="chapter-heading" id="chapterHeading"></div>
     <article class="reader-content" id="readerContent"></article>
 
     <div class="chapter-nav-buttons">
@@ -1718,7 +1709,6 @@ TAMAT`
       document.getElementById('readerAuthor').textContent = book.author;
       document.getElementById('chiNum').textContent = 'Bab ' + (currentChapterIndex + 1);
       document.getElementById('chiOf').textContent = 'daripada ' + book.chapters.length + (book.chapters.length === 1 ? ' bab' : ' bab');
-      document.getElementById('chapterHeading').textContent = chapter.title || '(Tiada tajuk)';
       document.getElementById('readerContent').textContent = chapter.content || '';
       document.getElementById('readerContent').style.fontSize = currentFontSize + 'px';
       document.getElementById('chapterSelect').value = currentChapterIndex;
