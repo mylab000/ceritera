@@ -123,7 +123,7 @@
   }
 
   *{ box-sizing:border-box; }
-  html,body{ margin:0; padding:0; }
+  html,body{ margin:0; padding:0; width:100%; max-width:100%; overflow-x:hidden; }
   body{
     background:var(--bg);
     color:var(--ink);
@@ -132,6 +132,13 @@
     display:flex; flex-direction:column;
     transition:background .35s, color .35s;
   }
+  /* Mobile safety net: stop any single element (long title, wide image, long unbroken
+     string like a URL) from forcing the viewport wider than the screen, which is what
+     makes mobile browsers auto-zoom-out on load. */
+  img, svg, canvas, video{ max-width:100%; height:auto; }
+  h1, h2, h3, p, span, div, a, button, label{ overflow-wrap:anywhere; word-break:break-word; }
+  input, textarea, select{ max-width:100%; }
+  table{ display:block; max-width:100%; overflow-x:auto; }
   /* cheerful ambient glow — sits on <body> so it covers every page/view in the app */
   body::before{
     content:""; position:fixed; inset:-10%; pointer-events:none; z-index:0;
@@ -482,15 +489,58 @@
   }
 </script>
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.12.0/mammoth.browser.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.min.js"></script>
 <script>
   let pdfjsReady = false;
-  try {
-    if (typeof pdfjsLib !== 'undefined') {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.js';
-      pdfjsReady = true;
+  let pdfjsLoadPromise = null;
+
+  const PDFJS_SOURCES = [
+    {
+      lib: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.min.js',
+      worker: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.js'
+    },
+    {
+      lib: 'https://unpkg.com/pdfjs-dist@4.0.379/build/pdf.min.js',
+      worker: 'https://unpkg.com/pdfjs-dist@4.0.379/build/pdf.worker.min.js'
     }
-  } catch (e) { pdfjsReady = false; }
+  ];
+
+  function loadScriptOnce(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('Gagal muat skrip: ' + src));
+      document.head.appendChild(s);
+    });
+  }
+
+  function loadPdfJs() {
+    if (pdfjsReady) return Promise.resolve();
+    if (pdfjsLoadPromise) return pdfjsLoadPromise;
+
+    pdfjsLoadPromise = (async () => {
+      let lastErr = null;
+      for (const src of PDFJS_SOURCES) {
+        try {
+          if (typeof pdfjsLib === 'undefined') {
+            await loadScriptOnce(src.lib);
+          }
+          if (typeof pdfjsLib !== 'undefined') {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = src.worker;
+            pdfjsReady = true;
+            return;
+          }
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      pdfjsLoadPromise = null; // benarkan cuba semula pada percubaan seterusnya
+      throw lastErr || new Error('pdfjsLib tidak wujud selepas semua sumber dicuba.');
+    })();
+
+    return pdfjsLoadPromise;
+  }
+
   const mammothReady = typeof mammoth !== 'undefined';
 </script>
 </head>
@@ -2039,7 +2089,11 @@ TAMAT`
     }
 
     async function extractTextFromPdf(file) {
-      if (!pdfjsReady) throw new Error('Perpustakaan pembaca PDF gagal dimuat. Semak sambungan internet dan cuba lagi.');
+      try {
+        await loadPdfJs();
+      } catch (e) {
+        throw new Error('Perpustakaan pembaca PDF gagal dimuat (' + e.message + '). Semak sambungan internet dan cuba lagi.');
+      }
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
       let fullText = '';
