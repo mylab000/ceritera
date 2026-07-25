@@ -2018,7 +2018,10 @@ TAMAT`
       html += '<div class="form-field"><label>Nama Novel</label><input type="text" id="newBookTitle" placeholder="Tajuk buku"></div>';
       html += '<div class="form-field"><label>Nama Penulis</label><input type="text" id="newBookAuthor" placeholder="Nama penulis"></div>';
       html += '<div class="form-field"><label>Bahasa</label><select id="newBookLang"><option value="BM">Bahasa Melayu</option><option value="BI">Bahasa Inggeris</option></select></div>';
-      html += '<div class="form-field"><label>Emoji (pilihan)</label><input type="text" id="newBookEmoji" placeholder="📘" maxlength="4"></div>';
+      html += '<div class="form-field"><label>Emoji (pilihan)</label>';
+      html += '  <input type="text" id="newBookEmoji" placeholder="📘" maxlength="4">';
+      html += '  <div id="emojiQuickPick" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>';
+      html += '</div>';
       html += '<div class="form-field">';
       html += '  <label>Muat naik fail buku (.docx atau .pdf)</label>';
       html += '  <label class="btn-lang" id="fileUploadLabel" style="display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer;">📄 Pilih fail .docx atau .pdf<input type="file" accept=".docx,.pdf" style="display:none;" onchange="handleBookFileUpload(event)"></label>';
@@ -2028,6 +2031,29 @@ TAMAT`
       html += '<div class="modal-actions"><button type="button" class="btn-cancel" onclick="closeAppModal()">Batal</button><button type="button" class="btn-lang active" id="saveBookBtn" style="flex:1; opacity:0.5;" disabled onclick="saveNewBook()">Simpan Buku</button></div>';
       html += '</div></div>';
       document.getElementById('modalRoot').innerHTML = html;
+
+      // Quick-pick emoji buttons — some devices/browsers render the plain text
+      // input's placeholder emoji as a flat colour swatch (missing colour-emoji
+      // font), which made the field look like a static, non-editable icon rather
+      // than something you can change. These buttons make it obvious it's
+      // editable: tap one to use it outright, or still type/paste your own into
+      // the field above for anything not listed here.
+      const quickEmojis = ['📘','📕','📗','📙','📖','✨','💕','🔥','🌧️','😂','🎓','🏆'];
+      const pickEl = document.getElementById('emojiQuickPick');
+      if (pickEl) {
+        pickEl.innerHTML = quickEmojis.map(em =>
+          '<button type="button" class="emoji-quick-btn" data-emoji="' + em + '" ' +
+          'style="width:38px; height:38px; font-size:18px; border-radius:10px; border:1.5px solid var(--line); background:#fff; cursor:pointer;">' + em + '</button>'
+        ).join('');
+        pickEl.querySelectorAll('.emoji-quick-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const input = document.getElementById('newBookEmoji');
+            if (input) input.value = btn.getAttribute('data-emoji');
+            pickEl.querySelectorAll('.emoji-quick-btn').forEach(b => b.style.borderColor = 'var(--line)');
+            btn.style.borderColor = 'var(--accent)';
+          });
+        });
+      }
     }
 
     // ==================== FILE UPLOAD (DOCX / PDF) ====================
@@ -2198,6 +2224,17 @@ TAMAT`
         }
       }
 
+      // Same idea for a page number sitting alone at the very BOTTOM of the page
+      // (a footer) — e.g. the standalone "1" left dangling after the title/genre
+      // line on a book's first page. Only drop it when it's the row's ONLY
+      // fragment, so we never eat a real line that merely ends in a number.
+      if (rows.length > 0) {
+        const lastRow = rows[rows.length - 1];
+        if (lastRow.length === 1 && /^\d{1,4}$/.test(lastRow[0].str.trim())) {
+          rows.pop();
+        }
+      }
+
       return rows;
     }
 
@@ -2270,8 +2307,38 @@ TAMAT`
       // have real evidence for those.
       const allBoundaries = Array.from(new Set([...confirmed, ...candidates])).sort((a, b) => a - b);
       const MIN_CHAPTER_CHARS = 400;
+
+      // Explicit Table-of-Contents zone: once we see a line mentioning "Isi
+      // Kandungan" / "Kandungan" / "Contents", every heading-like line after it
+      // is TOC noise until we hit one followed by a genuinely large block of
+      // prose. This matters because a TOC that continues onto a second page
+      // ("Isi Kandungan (Sambungan)") can itself contain enough short entries to
+      // add up past the normal per-gap threshold — and each entry's trailing page
+      // number (e.g. "Bab 16: Nota yang Disimpan 29") would otherwise get kept
+      // as a fake chapter with that number stuck onto the title.
+      const tocMarkerPattern = /\b(isi\s*kandungan|kandungan|table\s+of\s+contents|contents)\b/i;
+      const tocStartIdx = lines.findIndex(l => tocMarkerPattern.test(l.trim()));
+      let tocZoneEnd = -1;
+      if (tocStartIdx !== -1) {
+        const TOC_EXIT_CHARS = 800;
+        for (const idx of allBoundaries) {
+          if (idx <= tocStartIdx) continue;
+          const pos = allBoundaries.indexOf(idx);
+          const end = (pos + 1 < allBoundaries.length) ? allBoundaries[pos + 1] : lines.length;
+          let len = 0;
+          for (let j = idx + 1; j < end; j++) len += lines[j].trim().length;
+          if (confirmed.has(idx) || len >= TOC_EXIT_CHARS) {
+            tocZoneEnd = idx - 1; // this boundary is the real exit point, not TOC
+            break;
+          }
+        }
+        if (tocZoneEnd === -1) tocZoneEnd = lines.length; // no exit found — whole rest is TOC-adjacent noise
+      }
+      const inTocZone = idx => tocStartIdx !== -1 && idx > tocStartIdx && idx <= tocZoneEnd;
+
       const realHeadingIdx = new Set(confirmed);
       candidates.forEach(idx => {
+        if (inTocZone(idx)) return; // discard outright, regardless of trailing content length
         const pos = allBoundaries.indexOf(idx);
         const end = (pos + 1 < allBoundaries.length) ? allBoundaries[pos + 1] : lines.length;
         let len = 0;
@@ -2280,10 +2347,10 @@ TAMAT`
       });
       // Safety net: if there was no structural signal AND the threshold filtered
       // out every pattern candidate (e.g. a book with genuinely very short
-      // chapters), fall back to trusting all candidates rather than silently
-      // collapsing the whole document into one chapter.
+      // chapters), fall back to trusting all non-TOC-zone candidates rather than
+      // silently collapsing the whole document into one chapter.
       if (realHeadingIdx.size === 0 && candidates.length > 0) {
-        candidates.forEach(idx => realHeadingIdx.add(idx));
+        candidates.forEach(idx => { if (!inTocZone(idx)) realHeadingIdx.add(idx); });
       }
 
       const chapters = [];
@@ -2293,7 +2360,15 @@ TAMAT`
         const trimmed = line.trim();
         if (realHeadingIdx.has(i)) {
           if (current) chapters.push(current);
-          current = { title: trimmed, contentLines: [] };
+          let title = trimmed;
+          if (!confirmed.has(i)) {
+            // Text-pattern-based heading (not confirmed by real font/style
+            // structure) — strip a stray trailing page number left over from a
+            // TOC-style line that slipped past the filters above, e.g.
+            // "Bab 16: Nota yang Disimpan 29" -> "Bab 16: Nota yang Disimpan".
+            title = title.replace(/\s+\d{1,4}\s*$/, '').trim();
+          }
+          current = { title, contentLines: [] };
         } else if (current) {
           current.contentLines.push(line);
         } else {
