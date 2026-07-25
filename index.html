@@ -188,13 +188,47 @@
   @keyframes ptr-spin{ to{ transform:rotate(360deg); } }
 
   .theme-dropdown-wrap{ position:relative; }
-  .theme-dropdown-panel{ position:absolute; top:calc(100% + 8px); right:0; z-index:200; background:var(--panel); border:2px solid var(--ink); border-radius:14px; padding:10px; width:230px;
-    box-shadow:6px 6px 0 var(--accent); }
   .theme-panel-label{ font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px; padding:0 2px; }
-  .theme-swatch-grid{ display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; }
-  .theme-swatch{ width:38px; height:38px; border-radius:50%; border:2.5px solid transparent; cursor:pointer; padding:0; position:relative; }
-  .theme-swatch.active{ border-color:var(--ink); }
-  .theme-swatch.active::after{ content:''; position:absolute; inset:-5px; border-radius:50%; border:1.5px solid var(--ink); }
+
+  /* Theme picker modal — larger, tap-friendly swatches with visible labels */
+  .theme-modal-grid{
+    display:grid; grid-template-columns:repeat(3, 1fr); gap:14px 10px;
+  }
+  @media (max-width:420px){ .theme-modal-grid{ grid-template-columns:repeat(2, 1fr); } }
+  .theme-swatch-item{
+    display:flex; flex-direction:column; align-items:center; gap:6px;
+    background:none; border:none; cursor:pointer; padding:8px 4px; border-radius:14px;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .theme-swatch-item:hover{ background:var(--accent-soft); }
+  .theme-swatch{
+    width:52px; height:52px; min-width:52px; min-height:52px;
+    border-radius:50%; border:2.5px solid var(--line); cursor:pointer; padding:0; position:relative;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .theme-swatch-item.active .theme-swatch{ border-color:var(--ink); box-shadow:0 0 0 3px color-mix(in srgb, var(--ink) 15%, transparent); }
+  .theme-swatch-check{
+    color:#fff; font-size:1.1rem; font-weight:700; text-shadow:0 1px 3px rgba(0,0,0,0.5);
+    opacity:0; transition:opacity .15s;
+  }
+  .theme-swatch-item.active .theme-swatch-check{ opacity:1; }
+  .theme-swatch-name{ font-size:12.5px; font-weight:600; color:var(--ink); text-align:center; }
+  .theme-dark-row{
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    background:var(--accent-soft); border-radius:14px; padding:14px 16px; margin-top:18px;
+  }
+  .theme-dark-row-label{ font-size:14px; font-weight:700; color:var(--ink); }
+  .theme-switch{ position:relative; width:48px; height:28px; flex-shrink:0; }
+  .theme-switch input{ opacity:0; width:0; height:0; position:absolute; }
+  .theme-switch-track{
+    position:absolute; inset:0; background:var(--line); border-radius:20px; cursor:pointer; transition:background .2s;
+  }
+  .theme-switch-track::before{
+    content:''; position:absolute; width:22px; height:22px; left:3px; top:3px; background:#fff;
+    border-radius:50%; transition:transform .2s; box-shadow:0 1px 3px rgba(0,0,0,0.3);
+  }
+  .theme-switch input:checked + .theme-switch-track{ background:var(--accent); }
+  .theme-switch input:checked + .theme-switch-track::before{ transform:translateX(20px); }
 
   .auth-page{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; background:var(--bg); }
   .auth-card{ width:100%; max-width:380px; background:var(--panel); border:2px solid var(--ink); border-radius:20px; padding:32px 26px; box-shadow:6px 6px 0 var(--accent); }
@@ -419,7 +453,7 @@
   <div class="controls">
     <div class="sync-badge" id="sync-badge" title="Status segerak"></div>
     <div class="theme-dropdown-wrap" id="theme-dropdown-wrap">
-      <button class="icon-toggle-btn" id="theme-toggle-btn" onclick="toggleThemeDropdown(event)" title="Warna tema">🎨</button>
+      <button class="icon-toggle-btn" id="theme-toggle-btn" onclick="openThemeModal()" title="Warna tema">🎨</button>
     </div>
     <button class="icon-toggle-btn" id="dark-toggle-btn" onclick="toggleDarkMode()" title="Mod malam">🌙</button>
     <button class="icon-toggle-btn" id="logout-btn" onclick="handleLogout()" title="Log keluar">⎋</button>
@@ -1343,7 +1377,6 @@ TAMAT`
     ];
     let currentColorTheme = 'koral';
     let currentDarkMode = false;
-    let themeDropdownOpen = false;
 
     function applyThemeToDOM() {
       document.body.setAttribute('data-theme', currentColorTheme);
@@ -1369,8 +1402,7 @@ TAMAT`
       applyThemeToDOM();
       persistThemeLocal();
       persistThemeCloud();
-      themeDropdownOpen = false;
-      renderThemeDropdown();
+      renderThemeModalContent();
     }
 
     function toggleDarkMode() {
@@ -1378,34 +1410,41 @@ TAMAT`
       applyThemeToDOM();
       persistThemeLocal();
       persistThemeCloud();
+      renderThemeModalContent();
     }
 
-    function toggleThemeDropdown(e) {
-      if (e) e.stopPropagation();
-      themeDropdownOpen = !themeDropdownOpen;
-      renderThemeDropdown();
+    // Theme picker now opens as a full modal (like Add Book) instead of a small
+    // anchored dropdown — this fixes it being cramped / clipped / hard to tap on mobile.
+    function openThemeModal() {
+      let html = '<div class="modal-overlay" onclick="closeAppModal(event)"><div class="modal" onclick="event.stopPropagation()">';
+      html += '<div class="modal-header"><span class="modal-title">🎨 Warna Tema</span><button class="close-btn" onclick="closeAppModal()">✕</button></div>';
+      html += '<div id="themeModalBody"></div>';
+      html += '</div></div>';
+      document.getElementById('modalRoot').innerHTML = html;
+      renderThemeModalContent();
     }
 
-    function renderThemeDropdown() {
-      const wrap = document.getElementById('theme-dropdown-wrap');
-      if (!wrap) return;
-      const existing = wrap.querySelector('.theme-dropdown-panel');
-      if (existing) existing.remove();
-      if (!themeDropdownOpen) return;
-      const panel = document.createElement('div');
-      panel.className = 'theme-dropdown-panel';
-      panel.onclick = (ev) => ev.stopPropagation();
-      let html = '<div class="theme-panel-label">Warna Tema</div><div class="theme-swatch-grid">';
+    function renderThemeModalContent() {
+      const body = document.getElementById('themeModalBody');
+      if (!body) return;
+      let html = '<div class="theme-modal-grid">';
       COLOR_THEMES.forEach(t => {
         const active = currentColorTheme === t.key;
-        html += `<button type="button" class="theme-swatch${active ? ' active' : ''}" data-theme="${t.key}" style="background:var(--accent);" title="${t.label}" onclick="setColorTheme('${t.key}')"></button>`;
+        html += `<button type="button" class="theme-swatch-item${active ? ' active' : ''}" onclick="setColorTheme('${t.key}')">`;
+        html += `<span class="theme-swatch" data-theme-key="${t.key}"><span class="theme-swatch-check">✓</span></span>`;
+        html += `<span class="theme-swatch-name">${t.label}</span>`;
+        html += '</button>';
       });
       html += '</div>';
-      panel.innerHTML = html;
-      wrap.appendChild(panel);
+      html += '<div class="theme-dark-row">';
+      html += '<span class="theme-dark-row-label">🌙 Mod Malam</span>';
+      html += `<label class="theme-switch"><input type="checkbox" ${currentDarkMode ? 'checked' : ''} onchange="toggleDarkMode()"><span class="theme-switch-track"></span></label>`;
+      html += '</div>';
+      body.innerHTML = html;
+
       // Colour each swatch using its OWN theme's accent, not the currently active one
-      panel.querySelectorAll('.theme-swatch').forEach(sw => {
-        const key = sw.getAttribute('data-theme');
+      body.querySelectorAll('.theme-swatch').forEach(sw => {
+        const key = sw.getAttribute('data-theme-key');
         const probe = document.createElement('div');
         probe.setAttribute('data-theme', key);
         if (currentDarkMode) probe.classList.add('dark');
@@ -1416,13 +1455,6 @@ TAMAT`
         document.body.removeChild(probe);
       });
     }
-
-    document.addEventListener('click', (e) => {
-      if (themeDropdownOpen && !e.target.closest('.theme-dropdown-wrap')) {
-        themeDropdownOpen = false;
-        renderThemeDropdown();
-      }
-    });
 
     (function initThemeLocal() {
       try {
@@ -1780,49 +1812,32 @@ TAMAT`
     }
 
     // ==================== ADD / DELETE BOOK ====================
-    let addBookChapterCount = 0;
+
+    // Holds the chapters auto-extracted from the uploaded PDF/DOCX for the book
+    // currently being added. The person never sees or edits individual chapters —
+    // upload the file and it's ready to read and save.
+    let pendingBookChapters = null;
+    let pendingBookFileName = '';
 
     function openAddBookModal() {
-      addBookChapterCount = 0;
+      pendingBookChapters = null;
+      pendingBookFileName = '';
       let html = '<div class="modal-overlay" onclick="closeAppModal(event)"><div class="modal" onclick="event.stopPropagation()">';
       html += '<div class="modal-header"><span class="modal-title">Tambah Buku Baharu</span><button class="close-btn" onclick="closeAppModal()">✕</button></div>';
       html += '<div id="addBookError"></div>';
-      html += '<div class="form-field"><label>Tajuk</label><input type="text" id="newBookTitle" placeholder="Tajuk buku"></div>';
-      html += '<div class="form-field"><label>Penulis</label><input type="text" id="newBookAuthor" placeholder="Nama penulis"></div>';
+      html += '<div class="form-field"><label>Nama Novel</label><input type="text" id="newBookTitle" placeholder="Tajuk buku"></div>';
+      html += '<div class="form-field"><label>Nama Penulis</label><input type="text" id="newBookAuthor" placeholder="Nama penulis"></div>';
       html += '<div class="form-field"><label>Bahasa</label><select id="newBookLang"><option value="BM">Bahasa Melayu</option><option value="BI">Bahasa Inggeris</option></select></div>';
       html += '<div class="form-field"><label>Emoji (pilihan)</label><input type="text" id="newBookEmoji" placeholder="📘" maxlength="4"></div>';
       html += '<div class="form-field">';
-      html += '  <label>Muat naik fail (pilihan)</label>';
-      html += '  <label class="btn-lang" style="display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer;">📄 Pilih fail .docx atau .pdf<input type="file" accept=".docx,.pdf" style="display:none;" onchange="handleBookFileUpload(event)"></label>';
+      html += '  <label>Muat naik fail buku (.docx atau .pdf)</label>';
+      html += '  <label class="btn-lang" id="fileUploadLabel" style="display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer;">📄 Pilih fail .docx atau .pdf<input type="file" accept=".docx,.pdf" style="display:none;" onchange="handleBookFileUpload(event)"></label>';
       html += '  <div id="fileUploadStatus" style="font-size:12px; color:var(--muted); margin-top:6px;"></div>';
-      html += '  <div style="font-size:11.5px; color:var(--muted); margin-top:4px; line-height:1.5;">Bab dikesan automatik daripada tajuk seperti "Bab 1" atau "Chapter 1". PDF hasil imbasan (scan gambar) tidak boleh diekstrak.</div>';
+      html += '  <div style="font-size:11.5px; color:var(--muted); margin-top:4px; line-height:1.5;">Muat naik fail sahaja \u2014 kandungan terus dibaca dan disimpan secara automatik. Tiada bab perlu ditambah secara manual. PDF hasil imbasan (scan gambar) tidak boleh diekstrak.</div>';
       html += '</div>';
-      html += '<div id="chapterEditList"></div>';
-      html += '<button type="button" class="btn-lang" onclick="addChapterField()">＋ Tambah Bab</button>';
-      html += '<div class="modal-actions"><button type="button" class="btn-cancel" onclick="closeAppModal()">Batal</button><button type="button" class="btn-lang active" style="flex:1;" onclick="saveNewBook()">Simpan Buku</button></div>';
+      html += '<div class="modal-actions"><button type="button" class="btn-cancel" onclick="closeAppModal()">Batal</button><button type="button" class="btn-lang active" id="saveBookBtn" style="flex:1; opacity:0.5;" disabled onclick="saveNewBook()">Simpan Buku</button></div>';
       html += '</div></div>';
       document.getElementById('modalRoot').innerHTML = html;
-      addChapterField();
-    }
-
-    function addChapterField() {
-      addBookChapterCount++;
-      const idx = addBookChapterCount;
-      const container = document.getElementById('chapterEditList');
-      const block = document.createElement('div');
-      block.className = 'chapter-edit-block';
-      block.id = 'chapterBlock' + idx;
-      block.innerHTML = `
-        <button type="button" class="chapter-edit-remove" onclick="removeChapterField(${idx})">✕</button>
-        <div class="form-field"><label>Tajuk Bab ${idx}</label><input type="text" class="chapter-title-input" placeholder="Bab ${idx}: ..."></div>
-        <div class="form-field"><label>Kandungan</label><textarea class="chapter-content-input" placeholder="Tulis kandungan bab di sini..."></textarea></div>
-      `;
-      container.appendChild(block);
-    }
-
-    function removeChapterField(idx) {
-      const block = document.getElementById('chapterBlock' + idx);
-      if (block) block.remove();
     }
 
     // ==================== FILE UPLOAD (DOCX / PDF) ====================
@@ -1832,8 +1847,12 @@ TAMAT`
       if (!file) return;
       const statusEl = document.getElementById('fileUploadStatus');
       const errEl = document.getElementById('addBookError');
+      const saveBtn = document.getElementById('saveBookBtn');
+      const uploadLabel = document.getElementById('fileUploadLabel');
       if (errEl) errEl.innerHTML = '';
-      if (statusEl) statusEl.textContent = 'Membaca fail\u2026';
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.5'; }
+      if (statusEl) statusEl.innerHTML = '<span style="display:inline-flex; align-items:center; gap:6px;"><span class="ptr-spinner spinning" style="width:14px;height:14px;border-width:2px;"></span> Membaca dan menyimpan fail\u2026</span>';
+      if (uploadLabel) uploadLabel.style.pointerEvents = 'none';
 
       try {
         let rawText;
@@ -1850,8 +1869,8 @@ TAMAT`
           throw new Error('Tiada teks dijumpai dalam fail ini. Jika ini PDF hasil imbasan (scan), teks tidak dapat diekstrak automatik.');
         }
 
-        const chapters = splitIntoChapters(rawText);
-        populateChapterFieldsFromExtraction(chapters);
+        pendingBookChapters = splitIntoChapters(rawText);
+        pendingBookFileName = file.name;
 
         // Try to guess a title from the filename if the title field is still empty
         const titleInput = document.getElementById('newBookTitle');
@@ -1859,10 +1878,16 @@ TAMAT`
           titleInput.value = file.name.replace(/\.(docx|pdf)$/i, '').replace(/[_-]+/g, ' ').trim();
         }
 
-        if (statusEl) statusEl.textContent = '\u2713 ' + chapters.length + ' bab dikesan daripada "' + file.name + '". Sila semak di bawah sebelum simpan.';
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent); font-weight:700;">\u2713 Sedia dibaca</span> \u2014 ' + pendingBookChapters.length + ' bab dikesan daripada "' + escapeHtml(file.name) + '".';
+        if (uploadLabel) uploadLabel.innerHTML = '\u2713 ' + escapeHtml(file.name) + '<input type="file" accept=".docx,.pdf" style="display:none;" onchange="handleBookFileUpload(event)">';
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
       } catch (err) {
+        pendingBookChapters = null;
+        pendingBookFileName = '';
         if (statusEl) statusEl.textContent = '';
         if (errEl) errEl.innerHTML = '<div class="form-error">' + escapeHtml(err.message || 'Gagal proses fail.') + '</div>';
+      } finally {
+        if (uploadLabel) uploadLabel.style.pointerEvents = '';
       }
     }
 
@@ -1924,19 +1949,6 @@ TAMAT`
       return result;
     }
 
-    function populateChapterFieldsFromExtraction(chapters) {
-      // Clear existing chapter fields and rebuild from the extracted list.
-      document.getElementById('chapterEditList').innerHTML = '';
-      addBookChapterCount = 0;
-      chapters.forEach(ch => {
-        addChapterField();
-        const idx = addBookChapterCount;
-        const block = document.getElementById('chapterBlock' + idx);
-        block.querySelector('.chapter-title-input').value = ch.title;
-        block.querySelector('.chapter-content-input').value = ch.content;
-      });
-    }
-
     async function saveNewBook() {
       const title = document.getElementById('newBookTitle').value.trim();
       const author = document.getElementById('newBookAuthor').value.trim();
@@ -1945,18 +1957,13 @@ TAMAT`
       const errEl = document.getElementById('addBookError');
       errEl.innerHTML = '';
 
-      if (!title) { errEl.innerHTML = '<div class="form-error">Sila isi tajuk buku.</div>'; return; }
+      if (!title) { errEl.innerHTML = '<div class="form-error">Sila isi nama novel.</div>'; return; }
+      if (!pendingBookChapters || pendingBookChapters.length === 0) {
+        errEl.innerHTML = '<div class="form-error">Sila muat naik fail .docx atau .pdf terlebih dahulu.</div>';
+        return;
+      }
 
-      const chapterBlocks = document.querySelectorAll('.chapter-edit-block');
-      const chapters = [];
-      chapterBlocks.forEach(block => {
-        const t = block.querySelector('.chapter-title-input').value.trim();
-        const c = block.querySelector('.chapter-content-input').value.trim();
-        if (t || c) chapters.push({ title: t || 'Bab tanpa tajuk', content: c });
-      });
-      if (chapters.length === 0) { errEl.innerHTML = '<div class="form-error">Tambah sekurang-kurangnya satu bab.</div>'; return; }
-
-      const newBook = { id: uid(), title, author, lang, emoji, chapters };
+      const newBook = { id: uid(), title, author, lang, emoji, chapters: pendingBookChapters };
 
       if (currentUser) {
         const realId = await cloudCreateBook(newBook);
