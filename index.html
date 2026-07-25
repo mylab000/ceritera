@@ -2081,11 +2081,31 @@ TAMAT`
       }
     }
 
+    // Sentinel prefix used to flag a line as a STRUCTURALLY confirmed chapter
+    // heading — i.e. we have real evidence from the document itself (a Word
+    // "Heading 1/2/3" style, or a noticeably larger PDF font size), not just a
+    // guess from matching "Bab N" text. splitIntoChapters trusts these
+    // unconditionally; plain text-pattern matches still go through the
+    // TOC-filtering length check as a fallback for documents with no such styling.
+    const HEADING_MARK = '\u0001';
+
     async function extractTextFromDocx(file) {
       if (!mammothReady) throw new Error('Perpustakaan pembaca DOCX gagal dimuat. Semak sambungan internet dan cuba lagi.');
       const arrayBuffer = await file.arrayBuffer();
-      const result = await mammoth.extractRawText({ arrayBuffer });
-      return result.value;
+      // convertToHtml (unlike extractRawText) keeps Word's own paragraph styles.
+      // Mammoth's default style map already turns "Heading 1/2/3" paragraphs into
+      // <h1>/<h2>/<h3> — that is a much more reliable chapter signal than guessing
+      // from the text, since it reflects how the author actually structured the book.
+      const result = await mammoth.convertToHtml({ arrayBuffer });
+      const parsedDoc = new DOMParser().parseFromString(result.value, 'text/html');
+      let text = '';
+      parsedDoc.body.querySelectorAll(':scope > *').forEach(node => {
+        const raw = (node.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!raw) return;
+        const isHeading = /^H[1-3]$/i.test(node.tagName);
+        text += (isHeading ? HEADING_MARK : '') + raw + '\n\n';
+      });
+      return text.trim();
     }
 
     async function extractTextFromPdf(file) {
@@ -2096,12 +2116,28 @@ TAMAT`
       }
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      let fullText = '';
+
+      // Pass 1: turn every page's text fragments into visual rows, and collect
+      // every row's font height so we know what "normal body text" looks like
+      // in THIS particular PDF (varies a lot between books/templates).
+      const pagesRows = [];
+      const allHeights = [];
       for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         const page = await pdf.getPage(pageNum);
         const textContent = await page.getTextContent();
-        fullText += reconstructPageText(textContent.items) + '\n\n';
+        const rows = buildPdfRows(textContent.items);
+        pagesRows.push(rows);
+        rows.forEach(r => { if (r.length) allHeights.push(Math.max(...r.map(it => it.height))); });
       }
+      const sortedHeights = allHeights.slice().sort((a, b) => a - b);
+      const medianHeight = sortedHeights.length ? sortedHeights[Math.floor(sortedHeights.length / 2)] : 12;
+
+      // Pass 2: rebuild each page's text, flagging short lines whose font is
+      // noticeably bigger than that median as structurally-confirmed headings.
+      let fullText = '';
+      pagesRows.forEach(rows => {
+        fullText += pdfRowsToText(rows, medianHeight) + '\n\n';
+      });
       return fullText;
     }
 
@@ -2110,9 +2146,8 @@ TAMAT`
     // where runs get split up for kerning/justification) that is NOT the same as
     // visual reading order, so trusting that order still comes out scrambled.
     // Instead we use each fragment's actual position on the page: sort everything
-    // top-to-bottom then left-to-right, cluster fragments into visual lines, and
-    // only then decide where line breaks / paragraph breaks belong.
-    function reconstructPageText(items) {
+    // top-to-bottom then left-to-right, and cluster fragments into visual lines.
+    function buildPdfRows(items) {
       const parts = items
         .filter(it => it.str && it.str.trim().length > 0)
         .map(it => ({
@@ -2121,7 +2156,7 @@ TAMAT`
           y: it.transform ? it.transform[5] : 0,
           height: it.height || Math.abs(it.transform ? it.transform[0] : 0) || 10
         }));
-      if (parts.length === 0) return '';
+      if (parts.length === 0) return [];
 
       // Top-to-bottom (PDF y increases upward, so descending y = reading order),
       // then left-to-right as a tiebreak.
@@ -2145,59 +2180,108 @@ TAMAT`
       }
       rows.push(row);
 
+      // Many PDFs place a running page number right near the top-left of the page.
+      // Our position-based sort pulls that in as the very first token of the page,
+      // which is exactly what produced "1 PERANG DINGIN...", "2 BAB 1: ..." — the
+      // leading digit is the PDF's page number, not part of the real title/heading.
+      // Strip it: either drop it from an otherwise-real first row, or drop the row
+      // entirely if it was nothing but that number.
+      if (rows.length > 0) {
+        const firstRow = rows[0];
+        const looksLikePageNumber = firstRow.length > 0 && /^\d{1,4}$/.test(firstRow[0].str.trim());
+        if (looksLikePageNumber) {
+          if (firstRow.length > 1) {
+            firstRow.shift();
+          } else {
+            rows.shift();
+          }
+        }
+      }
+
+      return rows;
+    }
+
+    function pdfRowsToText(rows, medianHeight) {
       let text = '';
       let lastY = null;
       let lastHeight = null;
       rows.forEach(r => {
+        if (r.length === 0) return;
         r.sort((a, b) => a.x - b.x); // left-to-right within the line
         const lineText = r.map(it => it.str).join(' ').replace(/\s+/g, ' ').trim();
+        if (!lineText) return;
         const y = r[0].y;
         const height = Math.max(...r.map(it => it.height));
         if (lastY !== null) {
           const gap = Math.abs(lastY - y);
           text += (gap > (lastHeight || height) * 1.5) ? '\n\n' : '\n';
         }
-        text += lineText;
+        // A short line in a noticeably bigger font than the document's normal body
+        // text is a strong structural signal that it's a real chapter/section
+        // heading — this catches headings whose wording doesn't match "Bab N" at
+        // all (e.g. "Prolog", a spelled-out title, a differently-styled number).
+        const isHeadingSized = height > medianHeight * 1.25 && lineText.length < 90;
+        text += (isHeadingSized ? HEADING_MARK : '') + lineText;
         lastY = y;
         lastHeight = height;
       });
-
       return text.trim();
     }
 
-    // Detect lines like "Bab 1", "Bab 1: Tajuk", "Chapter 2", "CHAPTER 3 - Title" as chapter breaks.
-    // Falls back to a single chapter containing everything if no such headings are found.
+    // Detect chapter breaks two ways: (1) lines structurally confirmed as real
+    // headings by the extractor (HEADING_MARK — a Word Heading style, or a PDF
+    // line in a noticeably bigger font), trusted unconditionally; and (2) as a
+    // fallback for documents with no such structure, lines that look like "Bab 1",
+    // "Chapter 2", "Prolog", etc., only counted as real when substantial prose
+    // follows (so a Table of Contents doesn't get treated as real chapters).
+    // Falls back to a single chapter containing everything if nothing is found.
     function splitIntoChapters(rawText) {
-      const lines = rawText.replace(/\r\n/g, '\n').split('\n');
-      const chapterHeadingPattern = /^\s*(bab|chapter)\s+(\d+|[ivxlcdm]+)\b/i;
+      let lines = rawText.replace(/\r\n/g, '\n').split('\n');
+      const chapterHeadingPattern = /^\s*(bab|bahagian|chapter|part|prolog|epilog|pengenalan|penutup|interlud|selingan)\b/i;
 
-      // Pass 1: find every line that LOOKS like a chapter heading.
+      // Strip HEADING_MARK and remember which lines were structurally confirmed.
+      const confirmed = new Set();
+      lines = lines.map((line, i) => {
+        if (line.startsWith(HEADING_MARK)) {
+          confirmed.add(i);
+          return line.slice(HEADING_MARK.length);
+        }
+        return line;
+      });
+
+      // Text-pattern candidates, only for lines that aren't already confirmed.
       const candidates = [];
       lines.forEach((line, i) => {
+        if (confirmed.has(i)) return;
         const trimmed = line.trim();
         if (chapterHeadingPattern.test(trimmed) && trimmed.length < 100) {
           candidates.push(i);
         }
       });
 
-      // Pass 2: a real chapter has a substantial amount of prose before the next
-      // heading. A Table of Contents produces a run of headings each followed by
-      // almost nothing (blank lines, a short blurb, a page number) — those false
-      // positives are what previously created duplicate "Bab 1", "Bab 2"... entries
-      // ahead of the real chapters and made the chapter order look scrambled.
-      // We measure the content between each candidate and the next one, and only
-      // keep candidates that are followed by enough real text to be an actual chapter.
+      // A real chapter has a substantial amount of prose before the next heading.
+      // A Table of Contents produces a run of headings each followed by almost
+      // nothing (blank lines, a short blurb, a page number) — those false
+      // positives are what previously created duplicate "Bab 1", "Bab 2"...
+      // entries ahead of the real chapters. We measure the content between each
+      // candidate and the next boundary (structural OR pattern-based) and only
+      // keep candidates followed by enough real text to be an actual chapter.
+      // Structurally confirmed headings skip this check entirely — we already
+      // have real evidence for those.
+      const allBoundaries = Array.from(new Set([...confirmed, ...candidates])).sort((a, b) => a - b);
       const MIN_CHAPTER_CHARS = 400;
-      const realHeadingIdx = new Set();
-      candidates.forEach((idx, k) => {
-        const end = (k + 1 < candidates.length) ? candidates[k + 1] : lines.length;
+      const realHeadingIdx = new Set(confirmed);
+      candidates.forEach(idx => {
+        const pos = allBoundaries.indexOf(idx);
+        const end = (pos + 1 < allBoundaries.length) ? allBoundaries[pos + 1] : lines.length;
         let len = 0;
         for (let j = idx + 1; j < end; j++) len += lines[j].trim().length;
         if (len >= MIN_CHAPTER_CHARS) realHeadingIdx.add(idx);
       });
-      // Safety net: if the threshold filtered out every single candidate (e.g. a
-      // book with genuinely very short chapters), fall back to trusting all of them
-      // rather than silently collapsing the whole document into one chapter.
+      // Safety net: if there was no structural signal AND the threshold filtered
+      // out every pattern candidate (e.g. a book with genuinely very short
+      // chapters), fall back to trusting all candidates rather than silently
+      // collapsing the whole document into one chapter.
       if (realHeadingIdx.size === 0 && candidates.length > 0) {
         candidates.forEach(idx => realHeadingIdx.add(idx));
       }
@@ -2226,7 +2310,7 @@ TAMAT`
 
       if (result.length === 0) {
         // No headings detected anywhere — treat the whole document as one chapter.
-        return [{ title: 'Bab 1', content: rawText.trim() }];
+        return [{ title: 'Bab 1', content: rawText.replace(new RegExp(HEADING_MARK, 'g'), '').trim() }];
       }
       return result;
     }
