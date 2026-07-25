@@ -11,24 +11,25 @@
 <meta name="apple-mobile-web-app-title" content="Ceritera">
 <meta name="theme-color" content="#e0729f">
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
   :root, [data-theme="koral"]{
-    --bg:#fdf2f8;
-    --bg-alt:#f3e8fc;
-    --panel:#ffffff;
-    --ink:#3d2b3f;
-    --muted:#9b7fa6;
-    --line:#f0d9ec;
-    --accent:#e0729f;
-    --accent-soft:#fce4ef;
-    --accent2:#a78bda;
+    --bg:#ECE6F7;
+    --bg-alt:#F4EEFC;
+    --panel:#FFFBF8;
+    --ink:#473F58;
+    --muted:#9A90AC;
+    --line:#E4DCF2;
+    --accent:#8B72C9;
+    --accent-soft:#F4EEFC;
+    --accent2:#C3AEE8;
     --gold:#e0a96d;
     --display:'Georgia', 'Times New Roman', serif;
-    --sans:'Poppins', -apple-system, sans-serif;
+    --sans:'Inter', -apple-system, sans-serif;
     --mono:'JetBrains Mono', ui-monospace, monospace;
   }
   [data-theme="koral"].dark{
-    --bg:#241522; --bg-alt:#2e1a2c; --panel:#331e30; --ink:#f5e4ef; --muted:#b493ae;
-    --line:#4a2c46; --accent:#f591bb; --accent-soft:#452438; --accent2:#c4a3ec; --gold:#e0b380;
+    --bg:#262133; --bg-alt:#3C3552; --panel:#322C44; --ink:#EAE4F5; --muted:#AFA3C8;
+    --line:#4A4262; --accent:#B79CE8; --accent-soft:#3C3552; --accent2:#C3AEE8; --gold:#e0b380;
   }
 
   [data-theme="mint"]{
@@ -141,7 +142,7 @@
   }
 
   header{
-    position:relative; z-index:1;
+    position:relative; z-index:2;
     background:var(--panel);
     border-bottom:1px solid var(--line);
     padding:20px 28px;
@@ -187,8 +188,17 @@
   .ptr-spinner.spinning{ animation:ptr-spin 0.7s linear infinite; }
   @keyframes ptr-spin{ to{ transform:rotate(360deg); } }
 
-  .theme-dropdown-wrap{ position:relative; }
-  .theme-panel-label{ font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px; padding:0 2px; }
+  .app-menu-wrap{ position:relative; }
+  .app-dropdown-menu{ position:absolute; top:calc(100% + 8px); right:0; z-index:210; background:var(--panel); border:2px solid var(--ink); border-radius:14px; padding:8px; width:240px; box-shadow:6px 6px 0 var(--accent); }
+  .app-dropdown-item{ display:flex; align-items:center; gap:10px; width:100%; text-align:left; background:transparent; border:none; border-radius:10px; padding:10px 12px; font-size:13.5px; font-weight:600; color:var(--ink); cursor:pointer; font-family:var(--sans); }
+  .app-dropdown-item:hover{ background:var(--accent-soft); }
+  .app-dropdown-item .dd-icon{ font-size:15px; width:18px; text-align:center; flex-shrink:0; }
+  .app-dropdown-divider{ height:1px; background:var(--line); margin:6px 6px; }
+  .app-dropdown-label{ font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted); padding:8px 12px 4px; }
+  .app-dropdown-lang-row{ display:flex; gap:6px; padding:2px 8px 8px; }
+  .app-dropdown-lang-chip{ flex:1; text-align:center; padding:7px 4px; border-radius:8px; border:1.5px solid var(--line); background:transparent; font-size:11.5px; font-weight:700; color:var(--ink); cursor:pointer; font-family:var(--sans); }
+  .app-dropdown-lang-chip.active{ background:var(--accent); color:#fff; border-color:var(--accent); }
+  .menu-overlay{ position:fixed; inset:0; z-index:0; background:transparent; }
 
   /* Theme picker modal — larger, tap-friendly swatches with visible labels */
   .theme-modal-grid{
@@ -452,11 +462,9 @@
   </div>
   <div class="controls">
     <div class="sync-badge" id="sync-badge" title="Status segerak"></div>
-    <div class="theme-dropdown-wrap" id="theme-dropdown-wrap">
-      <button class="icon-toggle-btn" id="theme-toggle-btn" onclick="openThemeModal()" title="Warna tema">🎨</button>
+    <div class="app-menu-wrap" id="app-menu-wrap">
+      <button class="icon-toggle-btn" id="app-menu-btn" onclick="toggleAppMenu(event)" title="Menu">☰</button>
     </div>
-    <button class="icon-toggle-btn" id="dark-toggle-btn" onclick="toggleDarkMode()" title="Mod malam">🌙</button>
-    <button class="icon-toggle-btn" id="logout-btn" onclick="handleLogout()" title="Log keluar">⎋</button>
   </div>
 </header>
 
@@ -466,10 +474,6 @@
   <section id="libraryView">
     <div class="controls-bar">
       <input type="text" id="searchInput" placeholder="Cari tajuk atau penulis..." oninput="onSearch()">
-      <button class="btn-lang active" data-lang="ALL" onclick="switchLanguage('ALL')">Semua Buku</button>
-      <button class="btn-lang" data-lang="BM" onclick="switchLanguage('BM')">🇲🇾 BM</button>
-      <button class="btn-lang" data-lang="BI" onclick="switchLanguage('BI')">🇬🇧 BI</button>
-      <button class="btn-lang" onclick="openAddBookModal()">＋ Tambah Buku</button>
     </div>
 
     <div class="book-grid" id="bookGrid"></div>
@@ -515,6 +519,7 @@
 
 <footer>Ceritera &middot; Perpustakaan e-buku peribadi, jalan 100% dalam pelayar.</footer>
 </div>
+<div id="appMenuRoot"></div>
 <div id="modalRoot"></div>
 
 <script>
@@ -1370,7 +1375,7 @@ TAMAT`
 
     // ---------- Theme (colour palette + independent dark mode) ----------
     const COLOR_THEMES = [
-      { key:'koral', label:'Koral' }, { key:'mint', label:'Mint' }, { key:'lavender', label:'Lavender' },
+      { key:'koral', label:'Ungu' }, { key:'mint', label:'Mint' }, { key:'lavender', label:'Lavender' },
       { key:'pic', label:'Pic' }, { key:'sage', label:'Sage' }, { key:'beri', label:'Beri' },
       { key:'ros', label:'Ros' }, { key:'langit', label:'Langit' }, { key:'lemon', label:'Lemon' },
       { key:'laut', label:'Laut' }, { key:'pasir', label:'Pasir' }
@@ -1411,6 +1416,58 @@ TAMAT`
       persistThemeLocal();
       persistThemeCloud();
       renderThemeModalContent();
+      renderAppMenu();
+    }
+
+    // ---------- Consolidated header dropdown menu ----------
+    // Groups Tambah Buku, Warna Tema, Mod Malam, Bahasa, and Log Keluar into a
+    // single tidy menu instead of a row of separate icon buttons.
+    let appMenuOpen = false;
+
+    function toggleAppMenu(e) {
+      if (e) e.stopPropagation();
+      appMenuOpen = !appMenuOpen;
+      renderAppMenu();
+    }
+
+    function closeAppMenu() {
+      appMenuOpen = false;
+      const wrap = document.getElementById('app-menu-wrap');
+      const existingPanel = wrap && wrap.querySelector('.app-dropdown-menu');
+      if (existingPanel) existingPanel.remove();
+      const overlayRoot = document.getElementById('appMenuRoot');
+      if (overlayRoot) overlayRoot.innerHTML = '';
+    }
+
+    function renderAppMenu() {
+      const wrap = document.getElementById('app-menu-wrap');
+      const overlayRoot = document.getElementById('appMenuRoot');
+      if (!wrap || !overlayRoot) return;
+      const existingPanel = wrap.querySelector('.app-dropdown-menu');
+      if (existingPanel) existingPanel.remove();
+      overlayRoot.innerHTML = '';
+      if (!appMenuOpen) return;
+
+      // Transparent full-screen layer just to catch outside clicks and close the menu.
+      overlayRoot.innerHTML = '<div class="menu-overlay" onclick="closeAppMenu()"></div>';
+
+      // The panel itself is anchored inside .app-menu-wrap (position:relative),
+      // so it always sits correctly under the button regardless of header size.
+      let html = '<div class="app-dropdown-menu" onclick="event.stopPropagation()">';
+      html += '  <button type="button" class="app-dropdown-item" onclick="closeAppMenu();openAddBookModal()"><span class="dd-icon">➕</span>Tambah Buku</button>';
+      html += '  <button type="button" class="app-dropdown-item" onclick="closeAppMenu();openThemeModal()"><span class="dd-icon">🎨</span>Warna Tema</button>';
+      html += '  <button type="button" class="app-dropdown-item" onclick="toggleDarkMode()"><span class="dd-icon">' + (currentDarkMode ? '☀️' : '🌙') + '</span>' + (currentDarkMode ? 'Mod Terang' : 'Mod Malam') + '</button>';
+      html += '  <div class="app-dropdown-divider"></div>';
+      html += '  <div class="app-dropdown-label">Bahasa</div>';
+      html += '  <div class="app-dropdown-lang-row">';
+      html += '    <button type="button" class="app-dropdown-lang-chip' + (currentLangFilter === 'ALL' ? ' active' : '') + '" onclick="switchLanguage(\'ALL\')">Semua</button>';
+      html += '    <button type="button" class="app-dropdown-lang-chip' + (currentLangFilter === 'BM' ? ' active' : '') + '" onclick="switchLanguage(\'BM\')">🇲🇾 BM</button>';
+      html += '    <button type="button" class="app-dropdown-lang-chip' + (currentLangFilter === 'BI' ? ' active' : '') + '" onclick="switchLanguage(\'BI\')">🇬🇧 BI</button>';
+      html += '  </div>';
+      html += '  <div class="app-dropdown-divider"></div>';
+      html += '  <button type="button" class="app-dropdown-item" onclick="closeAppMenu();handleLogout()"><span class="dd-icon">⎋</span>Log Keluar</button>';
+      html += '</div>';
+      wrap.insertAdjacentHTML('beforeend', html);
     }
 
     // Theme picker now opens as a full modal (like Add Book) instead of a small
@@ -1519,6 +1576,7 @@ TAMAT`
       currentPage = 1;
       document.querySelectorAll('.btn-lang').forEach(b => b.classList.toggle('active', b.dataset.lang === lang));
       renderLibrary();
+      renderAppMenu();
     }
 
     function onSearch() {
