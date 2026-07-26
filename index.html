@@ -2206,6 +2206,7 @@ TAMAT`
           str: it.str,
           x: it.transform ? it.transform[4] : 0,
           y: it.transform ? it.transform[5] : 0,
+          width: it.width || 0,
           height: it.height || Math.abs(it.transform ? it.transform[0] : 0) || 10
         }));
       if (parts.length === 0) return [];
@@ -2270,7 +2271,27 @@ TAMAT`
       rows.forEach(r => {
         if (r.length === 0) return;
         r.sort((a, b) => a.x - b.x); // left-to-right within the line
-        const lineText = r.map(it => it.str).join(' ').replace(/\s+/g, ' ').trim();
+        // Join fragments within a line WITHOUT assuming a space belongs between
+        // every pair. PDF generators often split a single word into several
+        // fragments (commonly around a hyphen, e.g. "cepat" + "-" + "cepat" for
+        // "cepat-cepat", or "satu" + "-" + "satunya" for "satu-satunya") and
+        // those fragments sit flush against each other (x-gap ~0). Blindly
+        // joining every fragment with ' ' turned those into "cepat - cepat" /
+        // "satu - satunya". A real word gap (or an em-dash used as punctuation,
+        // which also arrives as its own fragment) has a distinctly larger x-gap
+        // — so only insert a space when the gap is big enough to be real.
+        let lineText = '';
+        let prevEnd = null;
+        r.forEach(it => {
+          if (prevEnd !== null) {
+            const gap = it.x - prevEnd;
+            const spaceThreshold = Math.max(1.2, it.height * 0.12);
+            if (gap > spaceThreshold) lineText += ' ';
+          }
+          lineText += it.str;
+          prevEnd = it.x + (it.width || 0);
+        });
+        lineText = lineText.replace(/\s+/g, ' ').trim();
         if (!lineText) return;
         const y = r[0].y;
         const height = Math.max(...r.map(it => it.height));
@@ -2301,7 +2322,18 @@ TAMAT`
     // Falls back to a single chapter containing everything if nothing is found.
     function splitIntoChapters(rawText) {
       let lines = rawText.replace(/\r\n/g, '\n').split('\n');
-      const chapterHeadingPattern = /^\s*(bab|bahagian|chapter|part|prolog|epilog|pengenalan|penutup|interlud|selingan)\b/i;
+      // "Bab"/"Bahagian"/"Chapter"/"Part" headings are always followed by a real
+      // chapter number in practice ("Bab 3", "Bahagian 1", "Chapter II") — so we
+      // require that number. Without it, an ordinary sentence that happens to
+      // word-wrap onto a new line starting with "bahagian" (a common Malay word
+      // meaning "part/section/area", unrelated to chapter titles) would
+      // otherwise be misread as a heading and split a real chapter mid-sentence.
+      const numberedChapterPattern = /^\s*(bab|bahagian|chapter|part)\s+([0-9]+|[ivxlcdm]+)\b/i;
+      // Prolog/Epilog/etc. have no number to anchor on, so instead require the
+      // whole line to be short and heading-shaped (keyword, optionally with a
+      // colon/dash and a brief title) rather than the start of a longer sentence.
+      const standaloneChapterPattern = /^\s*(prolog|epilog|pengenalan|penutup|interlud|selingan)\s*([:\-–—].{0,50})?$/i;
+      const chapterHeadingPattern = { test: (t) => numberedChapterPattern.test(t) || (t.length <= 60 && standaloneChapterPattern.test(t)) };
 
       // Strip HEADING_MARK and remember which lines were structurally confirmed.
       const confirmed = new Set();
