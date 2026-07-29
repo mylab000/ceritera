@@ -473,9 +473,10 @@
   }
   .reader-content{
     font-family:var(--display); font-size:1.15rem; line-height:1.95;
-    white-space:normal; word-break:normal; overflow-wrap:break-word;
+    white-space:normal; word-break:normal; overflow-wrap:normal;
     hyphens:none; word-spacing:normal; letter-spacing:normal; margin-bottom:44px; color:var(--ink);
   }
+  .reader-content *{ word-break:normal; overflow-wrap:normal; hyphens:none; }
   .reader-content p{
     margin:0 0 1.15em;
     white-space:normal; word-break:normal; overflow-wrap:normal;
@@ -1842,7 +1843,7 @@ TAMAT`
     // ---------- Reader ----------
     function isLegacyImportedBook(book) {
       if (!book || isBuiltInTitle(book.title)) return false;
-      // Books imported before V6 did not persist structural metadata in cloud.
+      // Books imported before V7 may contain an older structural model.
       // Their missing chapter headings cannot be reconstructed after the source
       // file has been discarded, so the app must require a clean re-import.
       return !Number(book.importVersion || 0) || Number(book.importVersion || 0) < IMPORT_SCHEMA_VERSION;
@@ -1852,7 +1853,7 @@ TAMAT`
       let html = '<div class="modal-overlay" onclick="closeAppModal(event)"><div class="modal" onclick="event.stopPropagation()">';
       html += '<div class="modal-header"><span class="modal-title">Import lama dikesan</span><button class="close-btn" onclick="closeAppModal()">✕</button></div>';
       html += '<div style="font-size:14px;line-height:1.65;color:var(--ink);">Salinan <strong>' + escapeHtml(book.title) + '</strong> ini datang daripada enjin import lama. Struktur yang sudah hilang—termasuk sempadan Nota Penulis dan Bab 1—tidak boleh dipulihkan daripada teks tersimpan.</div>';
-      html += '<div style="margin-top:10px;font-size:13px;color:var(--muted);">Muat naik semula fail PDF atau DOCX asal. Ceritera V6 akan menggantikan semua salinan lama dengan tajuk yang sama secara automatik.</div>';
+      html += '<div style="margin-top:10px;font-size:13px;color:var(--muted);">Muat naik semula fail PDF atau DOCX asal. Ceritera V7 akan menggantikan salinan lama berdasarkan tajuk atau nama fail sumber secara automatik.</div>';
       html += '<div class="modal-actions"><button type="button" class="btn-cancel" onclick="closeAppModal()">Tutup</button><button type="button" class="btn-lang active" style="flex:1" onclick="closeAppModal();openAddBookModal();">Import Semula</button></div>';
       html += '</div></div>';
       document.getElementById('modalRoot').innerHTML = html;
@@ -2059,7 +2060,7 @@ TAMAT`
         const stamp = Date.parse(book.importedAt || book.createdAt || '') || 0;
         const previous = chosen[key];
         const previousStamp = previous ? (Date.parse(previous.importedAt || previous.createdAt || '') || 0) : -1;
-        // Prefer a V6+ import, then the newest record. This prevents an old,
+        // Prefer the newest structural import version, then the newest record. This prevents an old,
         // corrupted duplicate from appearing beside the freshly re-imported copy.
         const rank = (book.importVersion || 0) * 10000000000000 + stamp;
         const previousRank = previous ? ((previous.importVersion || 0) * 10000000000000 + previousStamp) : -1;
@@ -2157,10 +2158,24 @@ TAMAT`
       }
     }
 
-    async function removeExistingCopiesByTitle(title) {
-      const key = normalizeBookKey(title);
+    function normalizeSourceFileKey(fileName) {
+      return String(fileName || '')
+        .normalize('NFKC')
+        .toLowerCase()
+        .replace(/\.(?:pdf|docx)$/i, '')
+        .replace(/[^a-z0-9\u00c0-\u024f]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    async function removeExistingCopiesForImport(title, sourceFile) {
+      const titleKey = normalizeBookKey(title);
+      const sourceKey = normalizeSourceFileKey(sourceFile);
       const copies = featuredBooks.filter(function(book) {
-        return normalizeBookKey(book && book.title) === key && !isBuiltInTitle(book && book.title);
+        if (isBuiltInTitle(book && book.title)) return false;
+        const sameTitle = normalizeBookKey(book && book.title) === titleKey;
+        const sameSource = sourceKey && normalizeSourceFileKey(book && book.sourceFile) === sourceKey;
+        return sameTitle || sameSource;
       });
       if (currentUser) {
         for (const book of copies) {
@@ -2168,9 +2183,9 @@ TAMAT`
           if (!ok) throw new Error('Versi lama buku ini tidak dapat dipadam daripada cloud. Cuba log keluar dan masuk semula sebelum mengimport.');
         }
       }
-      featuredBooks = featuredBooks.filter(function(book) {
-        return normalizeBookKey(book && book.title) !== key || isBuiltInTitle(book && book.title);
-      });
+      const copyIds = {};
+      copies.forEach(function(book) { copyIds[book.id] = true; });
+      featuredBooks = featuredBooks.filter(function(book) { return !copyIds[book.id]; });
       persistLocalBooks();
       return copies.length;
     }
@@ -2322,7 +2337,7 @@ TAMAT`
     // does not; it stores positioned glyphs. The PDF path therefore reconstructs
     // reading order from coordinates, detects repeated margin artefacts, and then
     // rebuilds paragraphs before chapters are created.
-    const IMPORT_SCHEMA_VERSION = 6;
+    const IMPORT_SCHEMA_VERSION = 7;
 
     async function handleBookFileUpload(e) {
       const file = e.target.files && e.target.files[0];
@@ -2352,10 +2367,10 @@ TAMAT`
           throw new Error('Tiada teks boleh dibaca. PDF hasil imbasan memerlukan OCR dan tidak boleh dipulihkan hanya daripada susun atur visual.');
         }
 
-        pendingBookChapters = structuredBlocksToChapters(model.blocks);
-        pendingBookFileName = file.name;
         pendingImportReport = model.report || { sourceType: lower.endsWith('.pdf') ? 'pdf' : 'docx' };
-        pendingImportAudit = auditImportedSections(pendingBookChapters);
+        pendingBookChapters = structuredBlocksToChapters(model.blocks, pendingImportReport);
+        pendingBookFileName = file.name;
+        pendingImportAudit = auditImportedSections(pendingBookChapters, pendingImportReport);
         if (!pendingImportAudit.ok) throw new Error('Struktur dokumen gagal audit: ' + pendingImportAudit.errors.join(' '));
 
         const titleInput = document.getElementById('newBookTitle');
@@ -2375,7 +2390,7 @@ TAMAT`
         const detectedFrontMatter = pendingBookChapters.filter(function(ch) { return ch && ch.kind === 'frontmatter'; }).length;
         const structureDetail = detectedFrontMatter ? ' · ' + detectedFrontMatter + ' bahagian awal diasingkan' : '';
         const preview = formatStructurePreview(pendingBookChapters);
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent);font-weight:700;">✓ Struktur V6 lulus audit</span> — ' + detectedChapters + ' bab dikesan' + structureDetail + detail + '.<div style="margin-top:7px;font-size:12px;line-height:1.5;color:var(--muted);"><strong>Urutan:</strong> ' + preview + '</div>';
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent);font-weight:700;">✓ Struktur V7 lulus audit</span> — ' + detectedChapters + ' bab dikesan' + structureDetail + detail + '.<div style="margin-top:7px;font-size:12px;line-height:1.5;color:var(--muted);"><strong>Urutan:</strong> ' + preview + '</div>';
         if (uploadLabel) uploadLabel.innerHTML = '✓ ' + escapeHtml(file.name) + '<input type="file" accept=".docx,.pdf" style="display:none;" onchange="handleBookFileUpload(event)">';
         if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
       } catch (err) {
@@ -2408,6 +2423,11 @@ TAMAT`
         .replace(/\u00A0/g, ' ')
         .replace(/[ \t\f\v]+/g, ' ')
         .replace(/ *\n */g, '\n')
+        // Repair only unambiguous punctuation boundaries. Numeric forms such as
+        // 1,000, 8:30 and version 2.1 remain untouched because the next token is a digit.
+        .replace(/([,;:!?])(?=[A-Za-zÀ-ÖØ-öø-ÿĀ-ž])/g, '$1 ')
+        .replace(/([.!?])(?=[A-ZÀ-ÖØ-ÞĀ-Ž“‘"])/g, '$1 ')
+        .replace(/([”’])(?=[A-Za-zÀ-ÖØ-öø-ÿĀ-ž])/g, '$1 ')
         .replace(/\s+([,.;:!?%])/g, '$1')
         .replace(/([([{“‘])\s+/g, '$1')
         .trim();
@@ -2621,9 +2641,10 @@ TAMAT`
 
       const cleaned = removeRepeatedNonPositionalArtifacts(blocks);
       const quality = analyzeImportQuality(cleaned.blocks);
+      const tocProfile = collectTocProfileFromBlocks(cleaned.blocks);
       return {
         blocks: cleaned.blocks,
-        report: {
+        report: Object.assign({
           sourceType: 'docx',
           importVersion: IMPORT_SCHEMA_VERSION,
           removedArtifacts: cleaned.removed,
@@ -2631,7 +2652,7 @@ TAMAT`
           warnings: result.messages || [],
           suspiciousLongTokens: quality.suspiciousLongTokens,
           hiddenHyphenArtifacts: quality.hiddenHyphenArtifacts
-        }
+        }, tocProfile)
       };
     }
 
@@ -2701,6 +2722,7 @@ TAMAT`
       // Detect contents pages before filtering. Chapter names listed in a table of
       // contents are references, not real chapter boundaries.
       pages.forEach(function(page) { page.isToc = isLikelyTocPage(page.rows); });
+      const tocProfile = collectTocProfileFromPages(pages);
 
       const sortedHeights = allBodyHeights.slice().sort(function(a, b) { return a - b; });
       const medianHeight = sortedHeights.length ? sortedHeights[Math.floor(sortedHeights.length / 2)] : 12;
@@ -2724,7 +2746,7 @@ TAMAT`
       const quality = analyzeImportQuality(blocks);
       return {
         blocks: blocks,
-        report: {
+        report: Object.assign({
           sourceType: 'pdf',
           importVersion: IMPORT_SCHEMA_VERSION,
           pages: pdf.numPages,
@@ -2733,7 +2755,7 @@ TAMAT`
           paragraphs: blocks.filter(function(b) { return b.type === 'paragraph'; }).length,
           suspiciousLongTokens: quality.suspiciousLongTokens,
           hiddenHyphenArtifacts: quality.hiddenHyphenArtifacts
-        }
+        }, tocProfile)
       };
     }
 
@@ -2768,6 +2790,25 @@ TAMAT`
       if (/[\(\[\{“‘]$/.test(a)) return '';
       if (last === "'" || last === '’' || first === "'" || first === '’') return '';
 
+      // A punctuation mark ending one positioned fragment and a letter beginning
+      // the next fragment represent a word boundary, not a glued token. Keep numeric
+      // punctuation compact (1,000 / 8:30 / 2.1).
+      if (/[,;:!?]$/.test(a) && isAlphaNumericEdge(first)) {
+        const beforePunctuation = a.charAt(a.length - 2);
+        if (/\d/.test(beforePunctuation) && /\d/.test(first) && /[,:]/.test(last)) return '';
+        return ' ';
+      }
+      if (last === '.' && /[A-ZÀ-ÖØ-ÞĀ-Ž]/.test(first)) {
+        const beforePeriod = a.charAt(a.length - 2);
+        if (/\d/.test(beforePeriod) && /\d/.test(first)) return '';
+        return ' ';
+      }
+
+      // Quotation marks can be separate positioned fragments. Keep the
+      // sentence boundary visible on both sides of a quotation.
+      if (/[.!?]$/.test(a) && /^[“‘"]/.test(b)) return ' ';
+      if (/[”’]$/.test(a) && /^[A-Za-zÀ-ÖØ-öø-ÿĀ-ž]/.test(b)) return ' ';
+
       // Em dashes are normally separated in prose.
       if (a === '—' || b === '—' || a === '–' || b === '–') return ' ';
 
@@ -2795,7 +2836,10 @@ TAMAT`
       });
       score += (s.match(/\s+[,.;:!?%]/g) || []).length * 8;
       score += (s.match(/[A-Za-zÀ-ÖØ-öø-ÿĀ-ž]\s+-\s+[A-Za-zÀ-ÖØ-öø-ÿĀ-ž]/g) || []).length * 8;
-      score += (s.match(/[.!?][A-ZÀ-ÖØ-Þ]/g) || []).length * 5;
+      score += (s.match(/[.!?][A-ZÀ-ÖØ-Þ]/g) || []).length * 8;
+      score += (s.match(/[,;:!?][A-Za-zÀ-ÖØ-öø-ÿĀ-ž]/g) || []).length * 10;
+      score += (s.match(/[.!?][“‘"]/g) || []).length * 10;
+      score += (s.match(/[”’][A-Za-zÀ-ÖØ-öø-ÿĀ-ž]/g) || []).length * 8;
       return score;
     }
 
@@ -2951,8 +2995,61 @@ TAMAT`
     }
 
     function parseChapterNumber(text) {
-      const m = normalizeImportedText(text).match(/^\s*(?:bab|bahagian|chapter|part)\s+(\d+)\b/i);
+      const m = normalizeImportedText(text).match(/^\s*(?:bab|bahagian|chapter|part)\s*(\d+)\b/i);
       return m ? parseInt(m[1], 10) : null;
+    }
+
+    function cleanTocChapterReference(text) {
+      let value = normalizeImportedText(text)
+        .replace(/^((?:bab|bahagian|chapter|part))(?=\d)/i, '$1 ')
+        .replace(/\.{2,}\s*\d{1,4}\s*$/, '');
+      const match = value.match(/^((?:bab|bahagian|chapter|part)\s*\d+\b.*?)(?:\s+\d{1,4})$/i);
+      if (match) value = match[1];
+      return value.replace(/\.{2,}\s*$/, '').trim();
+    }
+
+    function buildTocProfile(entries) {
+      const byNumber = {};
+      (entries || []).forEach(function(entry) {
+        if (!entry || !Number.isFinite(entry.number) || entry.number < 1) return;
+        if (!byNumber[entry.number]) byNumber[entry.number] = entry.title;
+      });
+      const numbers = Object.keys(byNumber).map(Number).sort(function(a, b) { return a - b; });
+      return {
+        expectedChapterCount: numbers.length,
+        expectedChapterMax: numbers.length ? numbers[numbers.length - 1] : 0,
+        tocChapterNumbers: numbers,
+        tocChapterTitles: numbers.map(function(number) { return { number: number, title: byNumber[number] }; })
+      };
+    }
+
+    function collectTocProfileFromPages(pages) {
+      const entries = [];
+      (pages || []).forEach(function(page) {
+        if (!page || !page.isToc) return;
+        (page.rows || []).forEach(function(row) {
+          const title = cleanTocChapterReference(row && row.text);
+          const number = parseChapterNumber(title);
+          if (number !== null) entries.push({ number: number, title: title });
+        });
+      });
+      return buildTocProfile(entries);
+    }
+
+    function collectTocProfileFromBlocks(blocks) {
+      const entries = [];
+      let inToc = false;
+      (blocks || []).forEach(function(block) {
+        const text = normalizeImportedText(block && block.text);
+        if (!text) return;
+        if (isTocHeadingText(text)) { inToc = true; return; }
+        if (!inToc) return;
+        if (isFrontMatterSectionHeading(text)) { inToc = false; return; }
+        const title = cleanTocChapterReference(text);
+        const number = parseChapterNumber(title);
+        if (number !== null) entries.push({ number: number, title: title });
+      });
+      return buildTocProfile(entries);
     }
 
     function isLikelyTocPage(rows) {
@@ -3031,7 +3128,7 @@ TAMAT`
 
     function looksLikeChapterHeading(text) {
       const s = normalizeImportedText(text);
-      return /^\s*(?:bab|bahagian|chapter|part)\s+(?:\d+|[ivxlcdm]+)\b/i.test(s) ||
+      return /^\s*(?:bab|bahagian|chapter|part)\s*(?:\d+|[ivxlcdm]+)\b/i.test(s) ||
         /^\s*(?:prolog|epilog|pengenalan|penutup|interlud|selingan)(?:\s*[:\-–—].{0,60})?$/i.test(s);
     }
 
@@ -3041,11 +3138,10 @@ TAMAT`
       if (!a) return b;
       if (!b) return a;
       if (/[-‐‑]\s*$/.test(a)) {
-        const leftWord = (a.match(/([A-Za-zÀ-ÖØ-öø-ÿĀ-ž]+)[-‐‑]\s*$/) || [])[1] || '';
-        const rightWord = (b.match(/^([A-Za-zÀ-ÖØ-öø-ÿĀ-ž]+)/) || [])[1] || '';
-        const keepHyphen = leftWord && rightWord &&
-          (leftWord.toLowerCase() === rightWord.toLowerCase() || leftWord.length <= 4);
-        return keepHyphen ? a + b : a.replace(/[-‐‑]\s*$/, '') + b;
+        // These source novels do not use automatic dictionary hyphenation. A visible
+        // line-end hyphen is therefore meaningful (benar-benar, semata-mata,
+        // seakan-akan) and must survive paragraph reflow.
+        return a + b;
       }
       if (/^[,.;:!?%)\]}”’]/.test(b)) return a + b;
       return a + ' ' + b;
@@ -3065,10 +3161,6 @@ TAMAT`
       }
 
       (pages || []).forEach(function(page) {
-        if (previousPageNum !== null && page.pageNum !== previousPageNum) {
-          flushParagraph();
-          previousRow = null;
-        }
         if (page.isToc) {
           flushParagraph();
           previousRow = null;
@@ -3077,8 +3169,7 @@ TAMAT`
         }
 
         // Do not discard a broad top/bottom band. Real chapter headings in the
-        // supplied novels sit around 9-10% from the top and were previously lost
-        // because the old engine treated the top 16% as a header zone.
+        // supplied novels sit around 9-10% from the top and must be protected.
         const bodyRows = page.rows.slice();
         const candidateLefts = bodyRows.filter(function(row) {
           return row.height <= medianHeight * 1.22 && row.text.length >= 25;
@@ -3094,7 +3185,7 @@ TAMAT`
           const heading = semanticHeading || (row.height > medianHeight * 1.28 && text.length < 100);
           const listItem = /^[•●▪◦*-]\s+/.test(text);
           const gap = (!isNewPage && previousRow) ? Math.abs(previousRow.y - row.y) : null;
-          const largeGap = gap !== null && gap > normalLineGap * 1.42;
+          const largeGap = gap !== null && gap > normalLineGap * 1.32;
           const indented = row.x > bodyLeft + indentThreshold;
 
           if (heading) {
@@ -3120,9 +3211,14 @@ TAMAT`
             });
           } else {
             let startNew = !currentParagraph;
-            if (!startNew && largeGap) startNew = true;
-            if (!startNew && indented && previousRow && endsSentence(currentParagraph.text)) startNew = true;
-            if (!startNew && isNewPage && indented && endsSentence(currentParagraph.text)) startNew = true;
+            if (!startNew && !isNewPage && largeGap) startNew = true;
+            if (!startNew && !isNewPage && indented && previousRow && endsSentence(currentParagraph.text)) startNew = true;
+            if (!startNew && isNewPage) {
+              // Continue only an obviously unfinished paragraph across a page.
+              // A heading, an indented first line or a completed sentence starts
+              // a fresh paragraph and prevents Nota Penulis/Bab boundaries merging.
+              if (indented || endsSentence(currentParagraph.text)) startNew = true;
+            }
             if (startNew) {
               flushParagraph();
               currentParagraph = {
@@ -3160,33 +3256,97 @@ TAMAT`
       return { suspiciousLongTokens: suspiciousLongTokens, hiddenHyphenArtifacts: hiddenHyphenArtifacts };
     }
 
-    function auditImportedSections(sections) {
+    function normalizedChapterHeading(value) {
+      return normalizeImportedText(value)
+        .toLowerCase()
+        .replace(/[^a-z0-9\u00c0-\u024f\u1e00-\u1eff]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function auditImportedSections(sections, report) {
       const errors = [];
       const warnings = [];
       const list = Array.isArray(sections) ? sections : [];
+      const chapterSections = list.filter(function(section) { return section && section.kind === 'chapter'; });
       const chapterIndexes = [];
       list.forEach(function(section, index) {
         if (section && section.kind === 'chapter') chapterIndexes.push(index);
       });
+
       if (!chapterIndexes.length) errors.push('Tiada sempadan bab sebenar dikesan.');
       const firstChapterIndex = chapterIndexes.length ? chapterIndexes[0] : -1;
       if (firstChapterIndex >= 0) {
         const first = list[firstChapterIndex];
         if (first.chapterNumber !== null && first.chapterNumber !== 1) {
-          warnings.push('Bab pertama yang dikesan bukan Bab 1.');
+          errors.push('Bab pertama yang dikesan bukan Bab 1.');
+        }
+        if (!normalizeImportedText(first.content || '') || normalizeImportedText(first.content || '').length < 80) {
+          errors.push('Kandungan awal Bab 1 terlalu pendek atau hilang.');
         }
         list.slice(0, firstChapterIndex).forEach(function(section) {
-          const text = String(section && section.content || '');
-          if (/\bBab\s+1\s*:/i.test(text)) errors.push('Bab 1 masih berada di dalam bahagian awal.');
+          const paragraphs = String(section && section.content || '').split(/\n+/);
+          if (paragraphs.some(function(line) { return looksLikeChapterHeading(line); })) {
+            errors.push('Sempadan bab masih berada di dalam ' + (section.title || 'bahagian awal') + '.');
+          }
         });
       }
-      list.forEach(function(section) {
-        if (!section) return;
-        if (section.kind === 'frontmatter' && /\bBab\s+\d+\s*:/i.test(String(section.content || ''))) {
-          errors.push('Sempadan bab bercampur dengan ' + (section.title || 'bahagian awal') + '.');
+
+      const numericChapters = chapterSections.filter(function(section) { return Number.isFinite(section.chapterNumber); });
+      if (numericChapters.length) {
+        const seen = {};
+        numericChapters.forEach(function(section) {
+          const number = section.chapterNumber;
+          if (seen[number]) errors.push('Nombor Bab ' + number + ' dikesan lebih daripada sekali.');
+          seen[number] = true;
+        });
+        const numbers = Object.keys(seen).map(Number).sort(function(a, b) { return a - b; });
+        if (numbers[0] !== 1) errors.push('Urutan bab tidak bermula dengan Bab 1.');
+        for (let expected = 1; expected <= numbers[numbers.length - 1]; expected++) {
+          if (!seen[expected]) errors.push('Bab ' + expected + ' hilang daripada urutan import.');
+        }
+      }
+
+      const expectedCount = Number(report && report.expectedChapterCount || 0);
+      if (expectedCount && chapterSections.length !== expectedCount) {
+        errors.push('Isi Kandungan menjangka ' + expectedCount + ' bab tetapi import menghasilkan ' + chapterSections.length + ' bab.');
+      }
+
+      const tocTitles = Array.isArray(report && report.tocChapterTitles) ? report.tocChapterTitles : [];
+      tocTitles.forEach(function(reference) {
+        const actual = chapterSections.find(function(section) { return section.chapterNumber === reference.number; });
+        if (!actual) return;
+        const expectedTitle = normalizedChapterHeading(reference.title);
+        const actualTitle = normalizedChapterHeading(actual.title);
+        if (expectedTitle && actualTitle && expectedTitle !== actualTitle) {
+          errors.push('Tajuk Bab ' + reference.number + ' tidak sepadan dengan Isi Kandungan.');
         }
       });
-      return { ok: errors.length === 0, errors: errors, warnings: warnings };
+
+      list.forEach(function(section) {
+        if (!section) return;
+        const content = String(section.content || '');
+        if (section.kind === 'frontmatter' && content.split(/\n+/).some(function(line) { return looksLikeChapterHeading(line); })) {
+          errors.push('Sempadan bab bercampur dengan ' + (section.title || 'bahagian awal') + '.');
+        }
+        if (/[\u00AD\uFFFE\uFFFF]/.test(content)) errors.push('Aksara sempang tersembunyi masih wujud dalam ' + (section.title || 'bahagian') + '.');
+        if (/[A-Za-zÀ-ÖØ-öø-ÿĀ-ž][,;:!?](?=[A-Za-zÀ-ÖØ-öø-ÿĀ-ž])/.test(content) ||
+            /[.!?](?=[“‘"])/.test(content) ||
+            /[”’](?=[A-Za-zÀ-ÖØ-öø-ÿĀ-ž])/.test(content)) {
+          errors.push('Perkataan atau petikan bercantum selepas tanda baca dalam ' + (section.title || 'bahagian') + '.');
+        }
+        if (/\s+[,.;:!?%]/.test(content)) errors.push('Ruang pelik sebelum tanda baca dalam ' + (section.title || 'bahagian') + '.');
+        if (/(?:^|\n).{2,140}\s*[·•|]\s*\d{1,5}(?:\n|$)/m.test(content)) {
+          errors.push('Running header/footer masih wujud dalam ' + (section.title || 'bahagian') + '.');
+        }
+        content.split(/\s+/).forEach(function(token) {
+          if (token.replace(/[^A-Za-zÀ-ÖØ-öø-ÿĀ-ž]/g, '').length > 35) {
+            warnings.push('Token luar biasa panjang ditemui dalam ' + (section.title || 'bahagian') + '.');
+          }
+        });
+      });
+
+      return { ok: errors.length === 0, errors: Array.from(new Set(errors)), warnings: Array.from(new Set(warnings)) };
     }
 
     function formatStructurePreview(sections) {
@@ -3195,8 +3355,33 @@ TAMAT`
       }).join(' → ') + ((sections || []).length > 7 ? ' → …' : '');
     }
 
-    function structuredBlocksToChapters(blocks) {
-      const clean = removeTocBlocks(cleanBlocksForDisplay(blocks, ''));
+    function splitEmbeddedStructuralBlocks(blocks) {
+      const out = [];
+      (blocks || []).forEach(function(block) {
+        const raw = String(block && block.text || '');
+        const lines = raw.split(/\n+/).map(normalizeImportedText).filter(Boolean);
+        const hasStructuralLine = lines.some(function(line) {
+          return looksLikeChapterHeading(line) || isFrontMatterSectionHeading(line) || isTocHeadingText(line);
+        });
+        if (!hasStructuralLine || lines.length <= 1) {
+          out.push(block);
+          return;
+        }
+        lines.forEach(function(line) {
+          const structural = looksLikeChapterHeading(line) || isFrontMatterSectionHeading(line) || isTocHeadingText(line);
+          out.push(Object.assign({}, block, {
+            type: structural ? 'heading' : (block.type === 'heading' ? 'paragraph' : block.type),
+            level: structural ? (looksLikeChapterHeading(line) ? 1 : 2) : block.level,
+            text: line
+          }));
+        });
+      });
+      return out;
+    }
+
+    function structuredBlocksToChapters(blocks, report) {
+      const expanded = splitEmbeddedStructuralBlocks(blocks);
+      const clean = removeTocBlocks(cleanBlocksForDisplay(expanded, ''));
       if (!clean.length) return [];
 
       const sections = [];
@@ -3244,7 +3429,7 @@ TAMAT`
       });
       flushCurrent();
 
-      const boundaryAudit = auditImportedSections(sections);
+      const boundaryAudit = auditImportedSections(sections, report);
       if (!boundaryAudit.ok) {
         throw new Error('Import dihentikan kerana struktur masih bercampur: ' + boundaryAudit.errors.join(' '));
       }
@@ -3278,14 +3463,14 @@ TAMAT`
         return;
       }
 
-      pendingImportAudit = auditImportedSections(pendingBookChapters);
+      pendingImportAudit = auditImportedSections(pendingBookChapters, pendingImportReport);
       if (!pendingImportAudit.ok) {
         errEl.innerHTML = '<div class="form-error">Buku tidak disimpan kerana sempadan struktur gagal audit: ' + escapeHtml(pendingImportAudit.errors.join(' ')) + '</div>';
         return;
       }
 
       try {
-        await removeExistingCopiesByTitle(title);
+        await removeExistingCopiesForImport(title, pendingBookFileName);
       } catch (replaceError) {
         errEl.innerHTML = '<div class="form-error">' + escapeHtml(replaceError.message || 'Gagal menggantikan salinan lama.') + '</div>';
         return;
