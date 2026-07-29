@@ -474,16 +474,11 @@
   .reader-content{
     font-family:var(--display); font-size:1.15rem; line-height:1.95;
     white-space:normal; word-break:normal; overflow-wrap:break-word;
-    hyphens:none; -webkit-hyphens:none;
-    text-rendering:optimizeLegibility; font-kerning:normal;
-    letter-spacing:normal; word-spacing:normal;
-    margin-bottom:44px; color:var(--ink);
+    hyphens:auto; margin-bottom:44px; color:var(--ink);
   }
   .reader-content p{
     margin:0 0 1.15em;
     white-space:normal; word-break:normal; overflow-wrap:break-word;
-    hyphens:none; -webkit-hyphens:none;
-    letter-spacing:normal; word-spacing:normal;
   }
   .reader-content h3,
   .reader-content h4{
@@ -724,7 +719,7 @@
   </section>
 </main>
 
-<footer>Ceritera &middot; Perpustakaan e-buku peribadi, jalan 100% dalam pelayar.</footer>
+<footer>Ceritera &middot; Import Adaptif V4 &middot; Perpustakaan e-buku peribadi, jalan 100% dalam pelayar.</footer>
 </div>
 <div id="modalRoot"></div>
 
@@ -2134,8 +2129,7 @@ TAMAT`
       html += '  <label>Muat naik fail buku (.docx atau .pdf)</label>';
       html += '  <label class="btn-lang" id="fileUploadLabel" style="display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer;">📄 Pilih fail .docx atau .pdf<input type="file" accept=".docx,.pdf" style="display:none;" onchange="handleBookFileUpload(event)"></label>';
       html += '  <div id="fileUploadStatus" style="font-size:12px; color:var(--muted); margin-top:6px;"></div>';
-      html += '  <div id="importPreview" style="display:none; margin-top:10px; padding:12px; border-radius:12px; background:var(--bg); box-shadow:var(--sh-in-sm); font-size:12.5px; line-height:1.65; max-height:180px; overflow:auto;"></div>';
-      html += '  <div style="font-size:11.5px; color:var(--muted); margin-top:6px; line-height:1.5;">Enjin V3 mengekalkan jarak perkataan, perenggan, heading dan senarai. PDF hasil imbasan (scan gambar) masih memerlukan OCR. Buku yang pernah diimport dengan enjin lama perlu dimuat naik semula kerana ruang yang telah hilang tidak boleh dipulihkan dengan tepat.</div>';
+      html += '  <div style="font-size:11.5px; color:var(--muted); margin-top:4px; line-height:1.5;">Muat naik fail sahaja \u2014 kandungan terus dibaca dan disimpan secara automatik. Tiada bab perlu ditambah secara manual. PDF hasil imbasan (scan gambar) tidak boleh diekstrak.</div>';
       html += '</div>';
       html += '<div class="modal-actions"><button type="button" class="btn-cancel" onclick="closeAppModal()">Batal</button><button type="button" class="btn-lang active" id="saveBookBtn" style="flex:1; opacity:0.5;" disabled onclick="saveNewBook()">Simpan Buku</button></div>';
       html += '</div></div>';
@@ -2166,11 +2160,12 @@ TAMAT`
     }
 
     // ==================== FILE UPLOAD (DOCX / PDF) ====================
-    // ==================== ADAPTIVE DOCUMENT IMPORT ENGINE V3 ====================
-    // V3: DOCX preserves manual breaks and semantic blocks. PDF spacing is rebuilt from
-    // coordinate gaps, font metrics, explicit EOL markers and column segmentation.
-    // Repeated margin artefacts are removed before paragraphs and chapters are built.
-    const IMPORT_SCHEMA_VERSION = 3;
+    // ==================== STRUCTURED IMPORT ENGINE V2 ====================
+    // DOCX carries semantic structure (headings, paragraphs, lists). PDF normally
+    // does not; it stores positioned glyphs. The PDF path therefore reconstructs
+    // reading order from coordinates, detects repeated margin artefacts, and then
+    // rebuilds paragraphs before chapters are created.
+    const IMPORT_SCHEMA_VERSION = 4;
 
     async function handleBookFileUpload(e) {
       const file = e.target.files && e.target.files[0];
@@ -2213,10 +2208,10 @@ TAMAT`
         if (pendingImportReport.pages) reportBits.push(pendingImportReport.pages + ' halaman');
         if (pendingImportReport.removedArtifacts) reportBits.push(pendingImportReport.removedArtifacts + ' header/footer dibuang');
         if (pendingImportReport.paragraphs) reportBits.push(pendingImportReport.paragraphs + ' perenggan');
-        if (pendingImportReport.suspiciousTokens) reportBits.push(pendingImportReport.suspiciousTokens + ' token panjang diperiksa');
+        if (pendingImportReport.hiddenHyphenArtifacts) reportBits.push(pendingImportReport.hiddenHyphenArtifacts + ' tanda sempang dipulihkan');
+        if (pendingImportReport.suspiciousLongTokens) reportBits.push(pendingImportReport.suspiciousLongTokens + ' token perlu semakan');
         const detail = reportBits.length ? ' · ' + reportBits.join(' · ') : '';
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent);font-weight:700;">✓ Struktur V3 siap</span> — ' + pendingBookChapters.length + ' bab dikesan' + detail + '.';
-        renderImportPreview(pendingBookChapters, pendingImportReport);
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent);font-weight:700;">✓ Struktur siap</span> — ' + pendingBookChapters.length + ' bab dikesan' + detail + '.';
         if (uploadLabel) uploadLabel.innerHTML = '✓ ' + escapeHtml(file.name) + '<input type="file" accept=".docx,.pdf" style="display:none;" onchange="handleBookFileUpload(event)">';
         if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
       } catch (err) {
@@ -2224,55 +2219,46 @@ TAMAT`
         pendingBookFileName = '';
         pendingImportReport = null;
         if (statusEl) statusEl.textContent = '';
-        const previewEl = document.getElementById('importPreview');
-        if (previewEl) { previewEl.style.display = 'none'; previewEl.innerHTML = ''; }
         if (errEl) errEl.innerHTML = '<div class="form-error">' + escapeHtml(err && err.message ? err.message : 'Gagal memproses fail.') + '</div>';
       } finally {
         if (uploadLabel) uploadLabel.style.pointerEvents = '';
       }
     }
 
+    // Import V4: normalize hidden PDF/DOCX characters without deleting
+    // meaningful hyphens. Some PDF generators expose a visible hyphen as
+    // U+00AD, U+FFFE or U+FFFF. Deleting it produced words such as
+    // "rakanrakan" and "mana-mana" with broken spacing.
     function normalizeImportedText(value) {
-      let s = String(value == null ? '' : value);
-      if (s.normalize) s = s.normalize('NFC');
-      return s
-        .replace(/\r\n?/g, '\n')
+      let text = String(value || '').replace(/\r\n?/g, '\n');
+      try { text = text.normalize('NFC'); } catch (e) {}
+
+      // Preserve discretionary/non-character hyphens as a normal hyphen.
+      text = text
+        .replace(/([A-Za-z0-9À-ÖØ-öø-ÿĀ-ž])(?:\u00AD|\uFFFE|\uFFFF)(?=[A-Za-z0-9À-ÖØ-öø-ÿĀ-ž])/g, '$1-')
+        .replace(/(?:\u00AD|\uFFFE|\uFFFF)(?=[A-Za-z0-9À-ÖØ-öø-ÿĀ-ž])/g, '-')
+        .replace(/([A-Za-z0-9À-ÖØ-öø-ÿĀ-ž])(?:\u00AD|\uFFFE|\uFFFF)/g, '$1-')
+        .replace(/[\u00AD\uFFFE\uFFFF]/g, '')
         .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
-        .replace(/\u00AD/g, '')
         .replace(/\u00A0/g, ' ')
-        .replace(/[\t\f\v]+/g, ' ')
-        .replace(/ {2,}/g, ' ')
+        .replace(/[ \t\f\v]+/g, ' ')
+        .replace(/ *\n */g, '\n')
         .replace(/\s+([,.;:!?%])/g, '$1')
-        .replace(/([.!?])([“‘\"'])/g, '$1 $2')
-        .replace(/([”’\"'])(?=[A-ZÀ-ÖØ-Þ])/g, '$1 ')
+        .replace(/([([{“‘])\s+/g, '$1')
         .trim();
+
+      return text;
     }
 
-    function countSuspiciousJoinedTokens(blocks) {
-      let count = 0;
-      (blocks || []).forEach(function(block) {
-        const tokens = String(block && block.text || '').match(/[A-Za-zÀ-ÖØ-öø-ÿĀ-ž]{28,}/g) || [];
-        count += tokens.length;
-      });
-      return count;
-    }
-
-    function renderImportPreview(chapters, report) {
-      const el = document.getElementById('importPreview');
-      if (!el) return;
-      const previewBlocks = [];
-      (chapters || []).slice(0, 2).forEach(function(chapter) {
-        if (chapter && chapter.title) previewBlocks.push({ type: 'heading', text: chapter.title });
-        (chapter && chapter.blocks || []).slice(0, 5).forEach(function(block) { previewBlocks.push(block); });
-      });
-      const previewText = previewBlocks.map(function(block) {
-        return (block.type === 'heading' ? '【' + block.text + '】' : block.text);
-      }).filter(Boolean).join('\n\n').slice(0, 1200);
-      const warning = report && report.suspiciousTokens
-        ? '<div style="margin-bottom:8px;color:#a25b18;font-weight:700;">⚠ ' + report.suspiciousTokens + ' token sangat panjang dikesan. Semak pratonton sebelum simpan.</div>'
-        : '<div style="margin-bottom:8px;color:var(--accent);font-weight:700;">Pratonton susunan teks</div>';
-      el.innerHTML = warning + '<div style="white-space:pre-wrap;word-break:normal;overflow-wrap:break-word;">' + escapeHtml(previewText || 'Tiada pratonton tersedia.') + '</div>';
-      el.style.display = 'block';
+    function normalizePdfFragment(value) {
+      // PDF.js may return hyphens as isolated fragments or hidden codepoints.
+      // Convert them before trimming so word boundaries remain recoverable.
+      let text = String(value || '').replace(/\r\n?/g, '\n');
+      try { text = text.normalize('NFC'); } catch (e) {}
+      return text
+        .replace(/[\u00AD\uFFFE\uFFFF]/g, '-')
+        .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
+        .replace(/\u00A0/g, ' ');
     }
 
     function normalizeArtifactSignature(value) {
@@ -2349,6 +2335,14 @@ TAMAT`
       return out;
     }
 
+    function appendTextWithBreaks(element, text) {
+      const parts = String(text || '').split('\n');
+      parts.forEach(function(part, index) {
+        if (index) element.appendChild(document.createElement('br'));
+        element.appendChild(document.createTextNode(part));
+      });
+    }
+
     function renderStructuredChapterContent(book, chapter) {
       const container = document.getElementById('readerContent');
       if (!container) return;
@@ -2366,7 +2360,7 @@ TAMAT`
             container.appendChild(activeList);
           }
           const li = document.createElement('li');
-          li.textContent = block.text;
+          appendTextWithBreaks(li, block.text);
           activeList.appendChild(li);
           return;
         }
@@ -2379,22 +2373,22 @@ TAMAT`
         } else {
           el = document.createElement('p');
         }
-        el.textContent = block.text;
+        appendTextWithBreaks(el, block.text);
         container.appendChild(el);
       });
     }
 
-    function extractDocxTextWithBreaks(node) {
+    function nodeTextPreservingBreaks(node) {
       if (!node) return '';
       if (node.nodeType === 3) return node.nodeValue || '';
       if (node.nodeType !== 1) return '';
       const tag = (node.tagName || '').toLowerCase();
       if (tag === 'br') return '\n';
-      let out = '';
+      let text = '';
       Array.prototype.forEach.call(node.childNodes || [], function(child) {
-        out += extractDocxTextWithBreaks(child);
+        text += nodeTextPreservingBreaks(child);
       });
-      return out;
+      return text;
     }
 
     async function extractStructuredDocx(file) {
@@ -2407,48 +2401,41 @@ TAMAT`
           "p[style-name='Heading 1'] => h1:fresh",
           "p[style-name='Heading 2'] => h2:fresh",
           "p[style-name='Heading 3'] => h3:fresh"
-        ],
-        includeDefaultStyleMap: true
+        ]
       });
       const parsed = new DOMParser().parseFromString(result.value, 'text/html');
       const blocks = [];
 
-      function addBlock(type, rawText, level) {
-        const lines = String(rawText == null ? '' : rawText).replace(/\r\n?/g, '\n').split(/\n+/);
-        lines.forEach(function(line) {
-          const clean = normalizeImportedText(line);
-          if (!clean) return;
-          blocks.push({ type: type, level: level || null, text: clean });
-        });
+      function addBlock(type, text, level) {
+        const clean = normalizeImportedText(text);
+        if (!clean) return;
+        blocks.push({ type: type, level: level || null, text: clean });
       }
 
       function visit(node) {
         if (!node || node.nodeType !== 1) return;
         const tag = node.tagName.toLowerCase();
-        const ownText = extractDocxTextWithBreaks(node);
         if (/^h[1-6]$/.test(tag)) {
-          addBlock('heading', ownText, parseInt(tag.slice(1), 10));
+          addBlock('heading', nodeTextPreservingBreaks(node), parseInt(tag.slice(1), 10));
           return;
         }
         if (tag === 'p') {
-          addBlock('paragraph', ownText);
+          addBlock('paragraph', nodeTextPreservingBreaks(node));
           return;
         }
         if (tag === 'blockquote') {
-          addBlock('quote', ownText);
+          addBlock('quote', nodeTextPreservingBreaks(node));
           return;
         }
         if (tag === 'ul' || tag === 'ol') {
           Array.prototype.forEach.call(node.children, function(li) {
-            if (li.tagName && li.tagName.toLowerCase() === 'li') addBlock('listItem', extractDocxTextWithBreaks(li));
+            if (li.tagName && li.tagName.toLowerCase() === 'li') addBlock('listItem', nodeTextPreservingBreaks(li));
           });
           return;
         }
         if (tag === 'table') {
           Array.prototype.forEach.call(node.querySelectorAll('tr'), function(tr) {
-            const cells = Array.prototype.map.call(tr.querySelectorAll('th,td'), function(cell) {
-              return normalizeImportedText(extractDocxTextWithBreaks(cell));
-            }).filter(Boolean);
+            const cells = Array.prototype.map.call(tr.querySelectorAll('th,td'), function(cell) { return normalizeImportedText(nodeTextPreservingBreaks(cell)); }).filter(Boolean);
             if (cells.length) addBlock('paragraph', cells.join(' | '));
           });
           return;
@@ -2458,7 +2445,7 @@ TAMAT`
       Array.prototype.forEach.call(parsed.body.children, visit);
 
       const cleaned = removeRepeatedNonPositionalArtifacts(blocks);
-      const suspiciousTokens = countSuspiciousJoinedTokens(cleaned.blocks);
+      const quality = analyzeImportQuality(cleaned.blocks);
       return {
         blocks: cleaned.blocks,
         report: {
@@ -2466,8 +2453,9 @@ TAMAT`
           importVersion: IMPORT_SCHEMA_VERSION,
           removedArtifacts: cleaned.removed,
           paragraphs: cleaned.blocks.filter(function(b) { return b.type === 'paragraph'; }).length,
-          suspiciousTokens: suspiciousTokens,
-          warnings: result.messages || []
+          warnings: result.messages || [],
+          suspiciousLongTokens: quality.suspiciousLongTokens,
+          hiddenHyphenArtifacts: quality.hiddenHyphenArtifacts
         }
       };
     }
@@ -2509,7 +2497,7 @@ TAMAT`
       for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         const page = await pdf.getPage(pageNum);
         const viewport = page.getViewport({ scale: 1 });
-        const textContent = await page.getTextContent();
+        const textContent = await page.getTextContent({ disableCombineTextItems: false, includeMarkedContent: false });
         const rows = buildStructuredPdfRows(textContent.items, {
           pageNum: pageNum,
           pageWidth: viewport.width,
@@ -2553,7 +2541,7 @@ TAMAT`
       });
 
       const blocks = pdfPagesToStructuredBlocks(pages, medianHeight, normalLineGap);
-      const suspiciousTokens = countSuspiciousJoinedTokens(blocks);
+      const quality = analyzeImportQuality(blocks);
       return {
         blocks: blocks,
         report: {
@@ -2562,79 +2550,115 @@ TAMAT`
           pages: pdf.numPages,
           removedArtifacts: removedArtifacts,
           paragraphs: blocks.filter(function(b) { return b.type === 'paragraph'; }).length,
-          suspiciousTokens: suspiciousTokens
+          suspiciousLongTokens: quality.suspiciousLongTokens,
+          hiddenHyphenArtifacts: quality.hiddenHyphenArtifacts
         }
       };
     }
 
-    function visibleCharCount(value) {
-      return Math.max(1, Array.from(String(value || '').replace(/\s/g, '')).length);
+    function medianPdfValue(values, fallback) {
+      const clean = (values || []).filter(function(v) { return isFinite(v) && v > 0; }).sort(function(a, b) { return a - b; });
+      return clean.length ? clean[Math.floor(clean.length / 2)] : fallback;
     }
 
-    function medianPdfCharWidth(items) {
-      const widths = (items || []).map(function(item) {
-        const count = visibleCharCount(item.str);
-        return item.width > 0 ? item.width / count : 0;
-      }).filter(function(v) { return isFinite(v) && v > 0.15 && v < 40; }).sort(function(a, b) { return a - b; });
-      return widths.length ? widths[Math.floor(widths.length / 2)] : 4.5;
+    function isAlphaNumericEdge(ch) {
+      return /[A-Za-z0-9À-ÖØ-öø-ÿĀ-ž]/.test(ch || '');
     }
 
-    function shouldInsertPdfSpace(prev, current, gap, charWidth) {
-      const a = String(prev && prev.str || '');
-      const b = String(current && current.str || '');
-      if (!a || !b) return false;
-      if (/\s$/.test(a) || /^\s/.test(b)) return false;
-      const last = a.slice(-1);
+    function pdfSeparator(prev, current, gap, medianCharWidth) {
+      if (!prev) return '';
+      const a = prev.clean;
+      const b = current.clean;
+      if (!a || !b) return '';
+
+      // Explicit whitespace in the PDF is the strongest signal.
+      if (prev.trailingSpace || current.leadingSpace) return ' ';
+
+      const last = a.charAt(a.length - 1);
       const first = b.charAt(0);
-      if (/^[,.;:!?%\)\]\}”’]/.test(first)) return false;
-      if (/[\(\[\{“‘]$/.test(last)) return false;
-      const threshold = Math.max(0.12, charWidth * 0.055);
-      if (gap > threshold) return true;
-      // Some PDF generators slightly over-report item width, making a real word
-      // gap appear almost zero. Only recover it when both fragments look like
-      // complete lexical chunks and the boxes do not materially overlap.
-      const lexicalBoundary = /[\p{L}\p{N}]$/u.test(last) && /^[\p{L}\p{N}]/u.test(first);
-      if (lexicalBoundary && gap > Math.max(0.02, charWidth * 0.005) && a.length >= 2 && b.length >= 2) return true;
-      return false;
+
+      // Reconstruct split compounds: benar + - + benar, seakan + - + akan.
+      if (/[-‐‑]/.test(last) && isAlphaNumericEdge(first)) return '';
+      if (/^[-‐‑]$/.test(b) && isAlphaNumericEdge(last)) return '';
+      if (/^[-‐‑]/.test(b) && isAlphaNumericEdge(last)) return '';
+
+      // Keep punctuation attached to the correct token.
+      if (/^[,.;:!?%\)\]\}”’]/.test(b)) return '';
+      if (/[\(\[\{“‘]$/.test(a)) return '';
+      if (last === "'" || last === '’' || first === "'" || first === '’') return '';
+
+      // Em dashes are normally separated in prose.
+      if (a === '—' || b === '—' || a === '–' || b === '–') return ' ';
+
+      const unit = Math.max(0.5, medianCharWidth || 4);
+      const ratio = Math.max(0, gap) / unit;
+      if (ratio >= 0.42) return ' ';
+      if (ratio <= 0.12) return '';
+
+      // Ambiguous middle zone: multi-character chunks are usually words,
+      // while one-character chunks are usually glyph fragments in one word.
+      const aLetters = a.replace(/[^A-Za-z0-9À-ÖØ-öø-ÿĀ-ž]/g, '').length;
+      const bLetters = b.replace(/[^A-Za-z0-9À-ÖØ-öø-ÿĀ-ž]/g, '').length;
+      if (aLetters > 1 && bLetters > 1 && isAlphaNumericEdge(last) && isAlphaNumericEdge(first)) return ' ';
+      return '';
+    }
+
+    function scorePdfLineCandidate(text) {
+      const s = normalizeImportedText(text);
+      let score = 0;
+      const words = s.split(/\s+/).filter(Boolean);
+      words.forEach(function(word) {
+        const letters = word.replace(/[^A-Za-zÀ-ÖØ-öø-ÿĀ-ž]/g, '');
+        if (letters.length > 24) score += 12 + (letters.length - 24);
+        if (/^[A-Za-zÀ-ÖØ-öø-ÿĀ-ž]$/.test(word)) score += 0.35;
+      });
+      score += (s.match(/\s+[,.;:!?%]/g) || []).length * 8;
+      score += (s.match(/[A-Za-zÀ-ÖØ-öø-ÿĀ-ž]\s+-\s+[A-Za-zÀ-ÖØ-öø-ÿĀ-ž]/g) || []).length * 8;
+      score += (s.match(/[.!?][A-ZÀ-ÖØ-Þ]/g) || []).length * 5;
+      return score;
     }
 
     function joinPdfFragments(items) {
-      const sorted = items.slice().sort(function(a, b) { return a.x - b.x; });
-      const charWidth = medianPdfCharWidth(sorted);
-      let line = '';
+      const sorted = items.slice().sort(function(a, b) { return a.x - b.x; }).map(function(item) {
+        const raw = normalizePdfFragment(item.str);
+        const clean = normalizeImportedText(raw);
+        const visibleChars = clean.replace(/\s/g, '').length || 1;
+        return Object.assign({}, item, {
+          raw: raw,
+          clean: clean,
+          leadingSpace: /^\s/.test(raw),
+          trailingSpace: /\s$/.test(raw),
+          charWidth: Math.abs(item.width || 0) / visibleChars
+        });
+      }).filter(function(item) { return item.clean; });
+      if (!sorted.length) return '';
+
+      const medianCharWidth = medianPdfValue(sorted.map(function(item) { return item.charWidth; }), 4);
+      let geometric = '';
+      let rawJoin = '';
+      let spacedJoin = '';
       let prev = null;
       sorted.forEach(function(item) {
         if (prev) {
-          const prevEnd = prev.x + prev.width;
-          const gap = item.x - prevEnd;
-          if (shouldInsertPdfSpace(prev, item, gap, charWidth)) line += ' ';
+          const gap = item.x - (prev.x + prev.width);
+          geometric += pdfSeparator(prev, item, gap, medianCharWidth);
+
+          // Alternative candidates are used only as a safety net for unusual PDFs.
+          const first = item.clean.charAt(0);
+          const last = prev.clean.charAt(prev.clean.length - 1);
+          const noSpace = /^[,.;:!?%\)\]\}”’]/.test(item.clean) || /[\(\[\{“‘-]$/.test(prev.clean) || /^[-‐‑]/.test(item.clean);
+          spacedJoin += noSpace ? '' : ' ';
+          if (prev.trailingSpace || item.leadingSpace) rawJoin += ' ';
         }
-        line += item.str;
+        geometric += item.clean;
+        rawJoin += item.clean;
+        spacedJoin += item.clean;
         prev = item;
       });
-      return normalizeImportedText(line);
-    }
 
-    function splitPdfLineIntoSegments(group, meta) {
-      const sorted = group.slice().sort(function(a, b) { return a.x - b.x; });
-      if (sorted.length < 2) return [sorted];
-      const charWidth = medianPdfCharWidth(sorted);
-      const segments = [];
-      let current = [sorted[0]];
-      for (let i = 1; i < sorted.length; i++) {
-        const prev = sorted[i - 1];
-        const item = sorted[i];
-        const gap = item.x - (prev.x + prev.width);
-        const columnBreak = Math.max((meta.pageWidth || 600) * 0.105, charWidth * 11);
-        if (gap > columnBreak) {
-          segments.push(current);
-          current = [item];
-        } else {
-          current.push(item);
-        }
-      }
-      segments.push(current);
-      return segments;
+      const candidates = [geometric, rawJoin, spacedJoin].map(normalizeImportedText);
+      candidates.sort(function(a, b) { return scorePdfLineCandidate(a) - scorePdfLineCandidate(b); });
+      return candidates[0];
     }
 
     function buildStructuredPdfRows(items, meta) {
@@ -2660,38 +2684,31 @@ TAMAT`
         const item = parts[i];
         const avgY = current.reduce(function(sum, part) { return sum + part.y; }, 0) / current.length;
         const maxHeight = Math.max.apply(null, current.map(function(part) { return part.height; }).concat([item.height]));
-        const previous = current[current.length - 1];
-        const forcedBreak = previous && previous.hasEOL;
-        if (!forcedBreak && Math.abs(item.y - avgY) <= maxHeight * 0.38) current.push(item);
+        if (Math.abs(item.y - avgY) <= maxHeight * 0.34) current.push(item);
         else { grouped.push(current); current = [item]; }
       }
       grouped.push(current);
 
-      const rows = [];
-      grouped.forEach(function(group) {
-        splitPdfLineIntoSegments(group, meta).forEach(function(segment) {
-          segment.sort(function(a, b) { return a.x - b.x; });
-          const text = joinPdfFragments(segment);
-          const x = Math.min.apply(null, segment.map(function(p) { return p.x; }));
-          const right = Math.max.apply(null, segment.map(function(p) { return p.x + p.width; }));
-          const y = segment.reduce(function(sum, p) { return sum + p.y; }, 0) / segment.length;
-          const height = Math.max.apply(null, segment.map(function(p) { return p.height; }));
-          rows.push({
-            text: text,
-            x: x,
-            y: y,
-            width: right - x,
-            height: height,
-            pageNum: meta.pageNum,
-            pageWidth: meta.pageWidth,
-            pageHeight: meta.pageHeight,
-            inTopMargin: y >= meta.pageHeight * 0.84,
-            inBottomMargin: y <= meta.pageHeight * 0.16
-          });
-        });
-      });
-      rows.sort(function(a, b) { return (b.y - a.y) || (a.x - b.x); });
-      return rows.filter(function(row) { return row.text; });
+      return grouped.map(function(group) {
+        group.sort(function(a, b) { return a.x - b.x; });
+        const text = joinPdfFragments(group);
+        const x = Math.min.apply(null, group.map(function(p) { return p.x; }));
+        const right = Math.max.apply(null, group.map(function(p) { return p.x + p.width; }));
+        const y = group.reduce(function(sum, p) { return sum + p.y; }, 0) / group.length;
+        const height = Math.max.apply(null, group.map(function(p) { return p.height; }));
+        return {
+          text: text,
+          x: x,
+          y: y,
+          width: right - x,
+          height: height,
+          pageNum: meta.pageNum,
+          pageWidth: meta.pageWidth,
+          pageHeight: meta.pageHeight,
+          inTopMargin: y >= meta.pageHeight * 0.84,
+          inBottomMargin: y <= meta.pageHeight * 0.16
+        };
+      }).filter(function(row) { return row.text; });
     }
 
     function detectRepeatedMarginArtifacts(pages) {
@@ -2811,6 +2828,19 @@ TAMAT`
       });
       flushParagraph();
       return cleanBlocksForDisplay(blocks, '');
+    }
+
+    function analyzeImportQuality(blocks) {
+      let suspiciousLongTokens = 0;
+      let hiddenHyphenArtifacts = 0;
+      (blocks || []).forEach(function(block) {
+        const text = String((block && block.text) || '');
+        hiddenHyphenArtifacts += (text.match(/[\u00AD\uFFFE\uFFFF]/g) || []).length;
+        text.split(/\s+/).forEach(function(token) {
+          if (token.replace(/[^A-Za-zÀ-ÖØ-öø-ÿĀ-ž]/g, '').length > 28) suspiciousLongTokens++;
+        });
+      });
+      return { suspiciousLongTokens: suspiciousLongTokens, hiddenHyphenArtifacts: hiddenHyphenArtifacts };
     }
 
     function structuredBlocksToChapters(blocks) {
