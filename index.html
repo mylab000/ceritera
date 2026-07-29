@@ -171,7 +171,7 @@
     100%{ transform:translate(2%,-1.5%) scale(1.02); }
   }
   @media (prefers-reduced-motion: reduce){ body::before{ animation:none !important; } }
-  body.reading::before{ opacity:0.4; animation-play-state:paused; }
+  body.reading::before{ opacity:0.12; animation:none; transform:none; }
 
   /* Dense floral background layer — sits with the ambient glow, only on the
      main library page (fades out while reading, same as the glow above). */
@@ -185,7 +185,7 @@
   #floralBg .floral-dot-a{ fill:var(--accent); }
   #floralBg .floral-dot-b{ fill:var(--accent2); }
   body.dark #floralBg{ opacity:0.14; }
-  body.reading #floralBg{ opacity:0.06; }
+  body.reading #floralBg{ display:none; }
   body:has(.auth-page) #floralBg{ opacity:0.08; }
 
   header{
@@ -481,6 +481,12 @@
     margin:0 0 1.15em;
     white-space:normal; word-break:normal; overflow-wrap:normal;
   }
+  /* Skip paint/layout work for off-screen reading blocks on modern browsers. */
+  .reader-content > p, .reader-content > h3, .reader-content > h4,
+  .reader-content > ul, .reader-content > blockquote{
+    content-visibility:auto;
+    contain-intrinsic-size:auto 3.2em;
+  }
   .reader-content h3,
   .reader-content h4{
     font-family:var(--display); line-height:1.35; margin:1.6em 0 .75em;
@@ -720,7 +726,7 @@
   </section>
 </main>
 
-<footer>Ceritera &middot; Import Sempadan Ketat V6 &middot; Perpustakaan e-buku peribadi, jalan 100% dalam pelayar.</footer>
+<footer>Ceritera &middot; V7.2 Prestasi &middot; Import stabil dan pembacaan lebih lancar, jalan 100% dalam pelayar.</footer>
 </div>
 <div id="modalRoot"></div>
 
@@ -1872,14 +1878,18 @@ TAMAT`
       document.getElementById('readerView').style.display = 'block';
       document.body.classList.add('reading');
       const book = featuredBooks[bookIndex];
-      if (currentUser && book && book.id) {
-        const savedIdx = await cloudLoadProgress(book.id);
-        if (savedIdx >= 0 && savedIdx < book.chapters.length) currentChapterIndex = savedIdx;
+      if (book) {
+        if (currentUser && book.id) {
+          const state = await Promise.all([cloudLoadProgress(book.id), loadBookmarkForBook(book)]);
+          const savedIdx = state[0];
+          if (savedIdx >= 0 && savedIdx < book.chapters.length) currentChapterIndex = savedIdx;
+        } else {
+          await loadBookmarkForBook(book);
+        }
       }
-      if (book) await loadBookmarkForBook(book);
       populateChapterSelect();
       renderChapter();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.scrollTo({ top: 0, behavior: 'auto' });
     }
 
     function closeReader() {
@@ -1932,9 +1942,9 @@ TAMAT`
       document.getElementById('nextChapBtn').disabled = currentChapterIndex >= book.chapters.length - 1;
 
       updateBookmarkButton();
-      if (currentUser && book.id) cloudSaveProgress(book.id, currentChapterIndex);
+      if (currentUser && book.id) scheduleCloudProgressSave(book.id, currentChapterIndex);
 
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.scrollTo({ top: 0, behavior: 'auto' });
     }
 
     function switchChapter(idxStr) {
@@ -2078,8 +2088,14 @@ TAMAT`
         .from('ceritera_chapters').select('*').eq('user_id', currentUser.id).order('chapter_order', { ascending: true });
       if (chErr) { console.error('Gagal muat bab', chErr); return null; }
 
+      const chaptersByBook = {};
+      (chapters || []).forEach(function(chapter) {
+        const key = chapter.book_id;
+        if (!chaptersByBook[key]) chaptersByBook[key] = [];
+        chaptersByBook[key].push(chapter);
+      });
       const loaded = books.map(function(b) {
-        const rows = chapters.filter(function(c) { return c.book_id === b.id; });
+        const rows = chaptersByBook[b.id] || [];
         const metaRow = rows.find(function(c) { return c.title === '__CERITERA_META_V6__'; });
         let meta = {};
         if (metaRow) {
@@ -2198,6 +2214,18 @@ TAMAT`
       return { theme: data.theme || 'koral', darkMode: !!data.dark_mode };
     }
 
+    function scheduleCloudProgressSave(bookId, chapterIdx) {
+      if (!supabaseClient || !currentUser || !bookId) return;
+      pendingProgressSave = { bookId: bookId, chapterIdx: chapterIdx };
+      if (progressSaveTimer) clearTimeout(progressSaveTimer);
+      progressSaveTimer = setTimeout(function() {
+        const job = pendingProgressSave;
+        pendingProgressSave = null;
+        progressSaveTimer = null;
+        if (job) cloudSaveProgress(job.bookId, job.chapterIdx);
+      }, 700);
+    }
+
     async function cloudSaveProgress(bookId, chapterIdx) {
       if (!supabaseClient || !currentUser || !bookId) return;
       try {
@@ -2260,9 +2288,34 @@ TAMAT`
       renderLibrary();
     }
 
-    function persistLocalBooks() {
+    function flushLocalBooksNow() {
+      if (localPersistHandle) {
+        if (typeof cancelIdleCallback === 'function') cancelIdleCallback(localPersistHandle);
+        else clearTimeout(localPersistHandle);
+        localPersistHandle = null;
+      }
       try { localStorage.setItem('ceriteraBooks', JSON.stringify(featuredBooks)); } catch (e) {}
     }
+
+    function persistLocalBooks() {
+      // Coalesce repeated writes and move the synchronous serialization to an
+      // idle slot so saving/replacing a book does not freeze the visible UI.
+      if (localPersistHandle) {
+        if (typeof cancelIdleCallback === 'function') cancelIdleCallback(localPersistHandle);
+        else clearTimeout(localPersistHandle);
+      }
+      const write = function() {
+        localPersistHandle = null;
+        try { localStorage.setItem('ceriteraBooks', JSON.stringify(featuredBooks)); } catch (e) {}
+      };
+      if (typeof requestIdleCallback === 'function') {
+        localPersistHandle = requestIdleCallback(write, { timeout: 500 });
+      } else {
+        localPersistHandle = setTimeout(write, 0);
+      }
+    }
+
+    window.addEventListener('pagehide', flushLocalBooksNow);
 
     function renderSyncBadge() {
       const el = document.getElementById('sync-badge');
@@ -2338,6 +2391,53 @@ TAMAT`
     // reading order from coordinates, detects repeated margin artefacts, and then
     // rebuilds paragraphs before chapters are created.
     const IMPORT_SCHEMA_VERSION = 7;
+    const PERFORMANCE_BUILD = '7.2';
+    const chapterRenderCache = new WeakMap();
+    let progressSaveTimer = null;
+    let pendingProgressSave = null;
+    let localPersistHandle = null;
+
+    function yieldToBrowser() {
+      return new Promise(function(resolve) { setTimeout(resolve, 0); });
+    }
+
+    function nextPaint() {
+      return new Promise(function(resolve) {
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(function() { resolve(); });
+        else setTimeout(resolve, 0);
+      });
+    }
+
+    function setImportStatus(message) {
+      const statusEl = document.getElementById('fileUploadStatus');
+      if (!statusEl) return;
+      statusEl.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px;"><span class="ptr-spinner spinning" style="width:14px;height:14px;border-width:2px;"></span> ' + escapeHtml(message) + '</span>';
+    }
+
+    function getPdfWorkerCount(totalPages) {
+      const cores = Math.max(2, Number(navigator.hardwareConcurrency || 4));
+      return Math.max(2, Math.min(totalPages || 1, 4, Math.floor(cores / 2)));
+    }
+
+    async function runConcurrentPageJobs(total, limit, worker, onProgress) {
+      const results = new Array(total);
+      let nextIndex = 0;
+      let completed = 0;
+      async function runner() {
+        while (true) {
+          const index = nextIndex++;
+          if (index >= total) return;
+          results[index] = await worker(index);
+          completed++;
+          if (onProgress) onProgress(completed, total);
+          if (completed % Math.max(1, limit) === 0) await yieldToBrowser();
+        }
+      }
+      const jobs = [];
+      for (let i = 0; i < Math.min(limit, total); i++) jobs.push(runner());
+      await Promise.all(jobs);
+      return results;
+    }
 
     async function handleBookFileUpload(e) {
       const file = e.target.files && e.target.files[0];
@@ -2355,10 +2455,15 @@ TAMAT`
       try {
         const lower = file.name.toLowerCase();
         let model;
+        const startedAt = performance.now();
         if (lower.endsWith('.docx')) {
+          setImportStatus('Membaca struktur DOCX…');
           model = await extractStructuredDocx(file);
         } else if (lower.endsWith('.pdf')) {
-          model = await extractStructuredPdf(file);
+          model = await extractStructuredPdf(file, function(done, total, stage) {
+            if (stage === 'extract') setImportStatus('Membaca PDF — halaman ' + done + ' daripada ' + total + '…');
+            else if (stage === 'assemble') setImportStatus('Menyusun perenggan dan bab…');
+          });
         } else {
           throw new Error('Format fail tidak disokong. Guna .docx atau .pdf sahaja.');
         }
@@ -2368,6 +2473,8 @@ TAMAT`
         }
 
         pendingImportReport = model.report || { sourceType: lower.endsWith('.pdf') ? 'pdf' : 'docx' };
+        await yieldToBrowser();
+        setImportStatus('Mengesahkan urutan dan sempadan bab…');
         pendingBookChapters = structuredBlocksToChapters(model.blocks, pendingImportReport);
         pendingBookFileName = file.name;
         pendingImportAudit = auditImportedSections(pendingBookChapters, pendingImportReport);
@@ -2390,7 +2497,10 @@ TAMAT`
         const detectedFrontMatter = pendingBookChapters.filter(function(ch) { return ch && ch.kind === 'frontmatter'; }).length;
         const structureDetail = detectedFrontMatter ? ' · ' + detectedFrontMatter + ' bahagian awal diasingkan' : '';
         const preview = formatStructurePreview(pendingBookChapters);
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent);font-weight:700;">✓ Struktur V7 lulus audit</span> — ' + detectedChapters + ' bab dikesan' + structureDetail + detail + '.<div style="margin-top:7px;font-size:12px;line-height:1.5;color:var(--muted);"><strong>Urutan:</strong> ' + preview + '</div>';
+        const elapsedSeconds = Math.max(0.1, (performance.now() - startedAt) / 1000).toFixed(1);
+        pendingImportReport.processingSeconds = Number(elapsedSeconds);
+        pendingImportReport.performanceBuild = PERFORMANCE_BUILD;
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent);font-weight:700;">✓ Struktur V7 lulus audit</span> — ' + detectedChapters + ' bab dikesan' + structureDetail + detail + ' · siap dalam ' + elapsedSeconds + 's.<div style="margin-top:7px;font-size:12px;line-height:1.5;color:var(--muted);"><strong>Urutan:</strong> ' + preview + '</div>';
         if (uploadLabel) uploadLabel.innerHTML = '✓ ' + escapeHtml(file.name) + '<input type="file" accept=".docx,.pdf" style="display:none;" onchange="handleBookFileUpload(event)">';
         if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
       } catch (err) {
@@ -2525,28 +2635,41 @@ TAMAT`
     }
 
     function appendTextWithBreaks(element, text) {
-      const parts = String(text || '').split('\n');
-      parts.forEach(function(part, index) {
-        if (index) element.appendChild(document.createElement('br'));
-        element.appendChild(document.createTextNode(part));
+      const value = String(text || '');
+      if (value.indexOf('\n') === -1) {
+        element.textContent = value;
+        return;
+      }
+      const fragment = document.createDocumentFragment();
+      value.split('\n').forEach(function(part, index) {
+        if (index) fragment.appendChild(document.createElement('br'));
+        fragment.appendChild(document.createTextNode(part));
       });
+      element.appendChild(fragment);
+    }
+
+    function getRenderableChapterBlocks(book, chapter) {
+      if (chapterRenderCache.has(chapter)) return chapterRenderCache.get(chapter);
+      let blocks = Array.isArray(chapter.blocks) && chapter.blocks.length
+        ? cleanBlocksForDisplay(chapter.blocks, book && book.title)
+        : plainTextToBlocks(chapter.content || '', book && book.title);
+      if (!blocks.length) blocks = [{ type: 'paragraph', text: 'Tiada kandungan dapat dipaparkan untuk bab ini.' }];
+      chapterRenderCache.set(chapter, blocks);
+      return blocks;
     }
 
     function renderStructuredChapterContent(book, chapter) {
       const container = document.getElementById('readerContent');
       if (!container) return;
-      container.innerHTML = '';
-      let blocks = Array.isArray(chapter.blocks) && chapter.blocks.length
-        ? cleanBlocksForDisplay(chapter.blocks, book && book.title)
-        : plainTextToBlocks(chapter.content || '', book && book.title);
-      if (!blocks.length) blocks = [{ type: 'paragraph', text: 'Tiada kandungan dapat dipaparkan untuk bab ini.' }];
-
+      const blocks = getRenderableChapterBlocks(book, chapter);
+      const fragment = document.createDocumentFragment();
       let activeList = null;
+
       blocks.forEach(function(block) {
         if (block.type === 'listItem') {
           if (!activeList) {
             activeList = document.createElement('ul');
-            container.appendChild(activeList);
+            fragment.appendChild(activeList);
           }
           const li = document.createElement('li');
           appendTextWithBreaks(li, block.text);
@@ -2563,8 +2686,9 @@ TAMAT`
           el = document.createElement('p');
         }
         appendTextWithBreaks(el, block.text);
-        container.appendChild(el);
+        fragment.appendChild(el);
       });
+      container.replaceChildren(fragment);
     }
 
     function nodeTextPreservingBreaks(node) {
@@ -2583,6 +2707,7 @@ TAMAT`
     async function extractStructuredDocx(file) {
       if (!mammothReady) throw new Error('Perpustakaan pembaca DOCX gagal dimuat. Semak sambungan internet dan cuba lagi.');
       const arrayBuffer = await file.arrayBuffer();
+      await nextPaint();
       const result = await mammoth.convertToHtml({ arrayBuffer: arrayBuffer }, {
         styleMap: [
           "p[style-name='Title'] => h1:fresh",
@@ -2638,6 +2763,7 @@ TAMAT`
         Array.prototype.forEach.call(node.children, visit);
       }
       Array.prototype.forEach.call(parsed.body.children, visit);
+      await yieldToBrowser();
 
       const cleaned = removeRepeatedNonPositionalArtifacts(blocks);
       const quality = analyzeImportQuality(cleaned.blocks);
@@ -2678,85 +2804,108 @@ TAMAT`
       return { blocks: cleaned, removed: removed };
     }
 
-    async function extractStructuredPdf(file) {
+    async function extractStructuredPdf(file, onProgress) {
       try {
         await loadPdfJs();
       } catch (e) {
         throw new Error('Perpustakaan pembaca PDF gagal dimuat (' + e.message + '). Semak sambungan internet dan cuba lagi.');
       }
       const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      const pages = [];
-      const allBodyHeights = [];
-      const gapCounts = {};
-
-      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-        const page = await pdf.getPage(pageNum);
-        const viewport = page.getViewport({ scale: 1 });
-        const textContent = await page.getTextContent({ disableCombineTextItems: false, includeMarkedContent: false });
-        const rows = buildStructuredPdfRows(textContent.items, {
-          pageNum: pageNum,
-          pageWidth: viewport.width,
-          pageHeight: viewport.height
-        });
-        const pageModel = { pageNum: pageNum, width: viewport.width, height: viewport.height, rows: rows, isToc: false };
-        pages.push(pageModel);
-        rows.forEach(function(row) {
-          if (!row.inTopMargin && !row.inBottomMargin) allBodyHeights.push(row.height);
-        });
-        for (let i = 1; i < rows.length; i++) {
-          const a = rows[i - 1], b = rows[i];
-          if (a.inTopMargin || a.inBottomMargin || b.inTopMargin || b.inBottomMargin) continue;
-          const gap = Math.abs(a.y - b.y);
-          if (gap > 0 && gap < 100) {
-            const bucket = Math.round(gap * 2) / 2;
-            gapCounts[bucket] = (gapCounts[bucket] || 0) + 1;
+      const loadingTask = pdfjsLib.getDocument({
+        data: new Uint8Array(arrayBuffer),
+        disableFontFace: true,
+        useSystemFonts: false
+      });
+      const pdf = await loadingTask.promise;
+      try {
+        const workerCount = getPdfWorkerCount(pdf.numPages);
+        const pages = await runConcurrentPageJobs(pdf.numPages, workerCount, async function(index) {
+          const pageNum = index + 1;
+          const page = await pdf.getPage(pageNum);
+          try {
+            const viewport = page.getViewport({ scale: 1 });
+            const textContent = await page.getTextContent({ disableCombineTextItems: false, includeMarkedContent: false });
+            const rows = buildStructuredPdfRows(textContent.items, {
+              pageNum: pageNum,
+              pageWidth: viewport.width,
+              pageHeight: viewport.height
+            });
+            return { pageNum: pageNum, width: viewport.width, height: viewport.height, rows: rows, isToc: false };
+          } finally {
+            if (page && typeof page.cleanup === 'function') page.cleanup();
           }
-        }
-      }
-
-      if (!pages.some(function(p) { return p.rows.length; })) {
-        throw new Error('PDF ini tidak mempunyai lapisan teks. Gunakan PDF teks asal atau jalankan OCR terlebih dahulu.');
-      }
-
-      // Detect contents pages before filtering. Chapter names listed in a table of
-      // contents are references, not real chapter boundaries.
-      pages.forEach(function(page) { page.isToc = isLikelyTocPage(page.rows); });
-      const tocProfile = collectTocProfileFromPages(pages);
-
-      const sortedHeights = allBodyHeights.slice().sort(function(a, b) { return a - b; });
-      const medianHeight = sortedHeights.length ? sortedHeights[Math.floor(sortedHeights.length / 2)] : 12;
-      let normalLineGap = null, bestCount = 0;
-      Object.keys(gapCounts).forEach(function(key) {
-        if (gapCounts[key] > bestCount) { bestCount = gapCounts[key]; normalLineGap = parseFloat(key); }
-      });
-      if (!normalLineGap) normalLineGap = medianHeight * 1.3;
-
-      const repeatedMarginSignatures = detectRepeatedMarginArtifacts(pages);
-      let removedArtifacts = 0;
-      pages.forEach(function(page) {
-        page.rows = page.rows.filter(function(row) {
-          const artifact = isPdfMarginArtifact(row, repeatedMarginSignatures);
-          if (artifact) removedArtifacts++;
-          return !artifact;
+        }, function(done, total) {
+          if (onProgress) onProgress(done, total, 'extract');
         });
-      });
 
-      const blocks = pdfPagesToStructuredBlocks(pages, medianHeight, normalLineGap);
-      const quality = analyzeImportQuality(blocks);
-      return {
-        blocks: blocks,
-        report: Object.assign({
-          sourceType: 'pdf',
-          importVersion: IMPORT_SCHEMA_VERSION,
-          pages: pdf.numPages,
-          tocPagesSkipped: pages.filter(function(p) { return p.isToc; }).length,
-          removedArtifacts: removedArtifacts,
-          paragraphs: blocks.filter(function(b) { return b.type === 'paragraph'; }).length,
-          suspiciousLongTokens: quality.suspiciousLongTokens,
-          hiddenHyphenArtifacts: quality.hiddenHyphenArtifacts
-        }, tocProfile)
-      };
+        if (!pages.some(function(p) { return p && p.rows.length; })) {
+          throw new Error('PDF ini tidak mempunyai lapisan teks. Gunakan PDF teks asal atau jalankan OCR terlebih dahulu.');
+        }
+
+        await yieldToBrowser();
+        if (onProgress) onProgress(pdf.numPages, pdf.numPages, 'assemble');
+
+        const allBodyHeights = [];
+        const gapCounts = {};
+        pages.forEach(function(page) {
+          page.rows.forEach(function(row) {
+            if (!row.inTopMargin && !row.inBottomMargin) allBodyHeights.push(row.height);
+          });
+          for (let i = 1; i < page.rows.length; i++) {
+            const a = page.rows[i - 1], b = page.rows[i];
+            if (a.inTopMargin || a.inBottomMargin || b.inTopMargin || b.inBottomMargin) continue;
+            const gap = Math.abs(a.y - b.y);
+            if (gap > 0 && gap < 100) {
+              const bucket = Math.round(gap * 2) / 2;
+              gapCounts[bucket] = (gapCounts[bucket] || 0) + 1;
+            }
+          }
+        });
+
+        // Detect contents pages before filtering. Chapter names listed in a table of
+        // contents are references, not real chapter boundaries.
+        pages.forEach(function(page) { page.isToc = isLikelyTocPage(page.rows); });
+        const tocProfile = collectTocProfileFromPages(pages);
+
+        const sortedHeights = allBodyHeights.slice().sort(function(a, b) { return a - b; });
+        const medianHeight = sortedHeights.length ? sortedHeights[Math.floor(sortedHeights.length / 2)] : 12;
+        let normalLineGap = null, bestCount = 0;
+        Object.keys(gapCounts).forEach(function(key) {
+          if (gapCounts[key] > bestCount) { bestCount = gapCounts[key]; normalLineGap = parseFloat(key); }
+        });
+        if (!normalLineGap) normalLineGap = medianHeight * 1.3;
+
+        const repeatedMarginSignatures = detectRepeatedMarginArtifacts(pages);
+        let removedArtifacts = 0;
+        pages.forEach(function(page) {
+          page.rows = page.rows.filter(function(row) {
+            const artifact = isPdfMarginArtifact(row, repeatedMarginSignatures);
+            if (artifact) removedArtifacts++;
+            return !artifact;
+          });
+        });
+
+        await yieldToBrowser();
+        const blocks = pdfPagesToStructuredBlocks(pages, medianHeight, normalLineGap);
+        const quality = analyzeImportQuality(blocks);
+        return {
+          blocks: blocks,
+          report: Object.assign({
+            sourceType: 'pdf',
+            importVersion: IMPORT_SCHEMA_VERSION,
+            performanceBuild: PERFORMANCE_BUILD,
+            pdfWorkers: workerCount,
+            pages: pdf.numPages,
+            tocPagesSkipped: pages.filter(function(p) { return p.isToc; }).length,
+            removedArtifacts: removedArtifacts,
+            paragraphs: blocks.filter(function(b) { return b.type === 'paragraph'; }).length,
+            suspiciousLongTokens: quality.suspiciousLongTokens,
+            hiddenHyphenArtifacts: quality.hiddenHyphenArtifacts
+          }, tocProfile)
+        };
+      } finally {
+        try { await pdf.destroy(); } catch (e) {}
+      }
     }
 
     function medianPdfValue(values, fallback) {
@@ -3455,6 +3604,7 @@ TAMAT`
       const lang = document.getElementById('newBookLang').value;
       const emoji = document.getElementById('newBookEmoji').value.trim() || '📘';
       const errEl = document.getElementById('addBookError');
+      const saveBtn = document.getElementById('saveBookBtn');
       errEl.innerHTML = '';
 
       if (!title) { errEl.innerHTML = '<div class="form-error">Sila isi nama novel.</div>'; return; }
@@ -3463,15 +3613,18 @@ TAMAT`
         return;
       }
 
-      pendingImportAudit = auditImportedSections(pendingBookChapters, pendingImportReport);
+      if (!pendingImportAudit) pendingImportAudit = auditImportedSections(pendingBookChapters, pendingImportReport);
       if (!pendingImportAudit.ok) {
         errEl.innerHTML = '<div class="form-error">Buku tidak disimpan kerana sempadan struktur gagal audit: ' + escapeHtml(pendingImportAudit.errors.join(' ')) + '</div>';
         return;
       }
 
       try {
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.65'; saveBtn.textContent = 'Menyimpan…'; }
+        await nextPaint();
         await removeExistingCopiesForImport(title, pendingBookFileName);
       } catch (replaceError) {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; saveBtn.textContent = 'Simpan Buku'; }
         errEl.innerHTML = '<div class="form-error">' + escapeHtml(replaceError.message || 'Gagal menggantikan salinan lama.') + '</div>';
         return;
       }
@@ -3482,6 +3635,7 @@ TAMAT`
         sourceType: pendingImportReport && pendingImportReport.sourceType ? pendingImportReport.sourceType : 'upload',
         sourceFile: pendingBookFileName || '',
         importedAt: new Date().toISOString(),
+        performanceBuild: PERFORMANCE_BUILD,
         importVersion: IMPORT_SCHEMA_VERSION,
         importReport: pendingImportReport || null
       };
