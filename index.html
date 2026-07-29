@@ -474,11 +474,11 @@
   .reader-content{
     font-family:var(--display); font-size:1.15rem; line-height:1.95;
     white-space:normal; word-break:normal; overflow-wrap:break-word;
-    hyphens:auto; margin-bottom:44px; color:var(--ink);
+    hyphens:none; word-spacing:normal; letter-spacing:normal; margin-bottom:44px; color:var(--ink);
   }
   .reader-content p{
     margin:0 0 1.15em;
-    white-space:normal; word-break:normal; overflow-wrap:break-word;
+    white-space:normal; word-break:normal; overflow-wrap:normal;
   }
   .reader-content h3,
   .reader-content h4{
@@ -719,7 +719,7 @@
   </section>
 </main>
 
-<footer>Ceritera &middot; Import Adaptif V4 &middot; Perpustakaan e-buku peribadi, jalan 100% dalam pelayar.</footer>
+<footer>Ceritera &middot; Import Struktur Sebenar V5 &middot; Perpustakaan e-buku peribadi, jalan 100% dalam pelayar.</footer>
 </div>
 <div id="modalRoot"></div>
 
@@ -1741,6 +1741,41 @@ TAMAT`
       });
     }
 
+    function getActualChapterCount(book) {
+      if (!book || !Array.isArray(book.chapters)) return 0;
+      const tagged = book.chapters.filter(function(ch) { return ch && ch.kind === 'chapter'; }).length;
+      return tagged || book.chapters.length;
+    }
+
+    function getFrontMatterCount(book) {
+      if (!book || !Array.isArray(book.chapters)) return 0;
+      return book.chapters.filter(function(ch) { return ch && ch.kind === 'frontmatter'; }).length;
+    }
+
+    function getChapterIndicator(book, index) {
+      const chapters = book && Array.isArray(book.chapters) ? book.chapters : [];
+      const current = chapters[index] || {};
+      const hasKinds = chapters.some(function(ch) { return ch && ch.kind; });
+      if (!hasKinds || current.kind !== 'frontmatter') {
+        let ordinal = 0;
+        let total = 0;
+        chapters.forEach(function(ch, i) {
+          if (!hasKinds || !ch || ch.kind !== 'frontmatter') {
+            total++;
+            if (i <= index) ordinal++;
+          }
+        });
+        if (current.chapterNumber) ordinal = current.chapterNumber;
+        return { label: 'Bab ' + Math.max(1, ordinal), detail: 'daripada ' + Math.max(1, total) + ' bab' };
+      }
+      let ordinal = 0;
+      const total = getFrontMatterCount(book);
+      chapters.forEach(function(ch, i) {
+        if (ch && ch.kind === 'frontmatter' && i <= index) ordinal++;
+      });
+      return { label: 'Bahagian Awal ' + Math.max(1, ordinal), detail: 'daripada ' + Math.max(1, total) + ' bahagian awal' };
+    }
+
     function renderLibrary() {
       const filtered = getFilteredBooks();
       const totalPages = Math.max(1, Math.ceil(filtered.length / booksPerPage));
@@ -1764,7 +1799,7 @@ TAMAT`
                 <div class="book-title">${escapeHtml(book.title)}</div>
                 <div class="book-meta">${escapeHtml(book.author)}</div>
               </div>
-              <span class="book-tag">${flag} ${book.lang} &middot; ${book.chapters.length} bab</span>
+              <span class="book-tag">${flag} ${book.lang} &middot; ${getActualChapterCount(book)} bab</span>
             </div>
           `;
         }).join('');
@@ -1858,8 +1893,9 @@ TAMAT`
 
       document.getElementById('readerTitle').textContent = book.title;
       document.getElementById('readerAuthor').textContent = book.author;
-      document.getElementById('chiNum').textContent = 'Bab ' + (currentChapterIndex + 1);
-      document.getElementById('chiOf').textContent = 'daripada ' + book.chapters.length + (book.chapters.length === 1 ? ' bab' : ' bab');
+      const indicator = getChapterIndicator(book, currentChapterIndex);
+      document.getElementById('chiNum').textContent = indicator.label;
+      document.getElementById('chiOf').textContent = indicator.detail;
       renderStructuredChapterContent(book, chapter);
       document.getElementById('readerContent').style.fontSize = currentFontSize + 'px';
       document.getElementById('chapterSelect').value = currentChapterIndex;
@@ -2165,7 +2201,7 @@ TAMAT`
     // does not; it stores positioned glyphs. The PDF path therefore reconstructs
     // reading order from coordinates, detects repeated margin artefacts, and then
     // rebuilds paragraphs before chapters are created.
-    const IMPORT_SCHEMA_VERSION = 4;
+    const IMPORT_SCHEMA_VERSION = 5;
 
     async function handleBookFileUpload(e) {
       const file = e.target.files && e.target.files[0];
@@ -2207,11 +2243,15 @@ TAMAT`
         const reportBits = [];
         if (pendingImportReport.pages) reportBits.push(pendingImportReport.pages + ' halaman');
         if (pendingImportReport.removedArtifacts) reportBits.push(pendingImportReport.removedArtifacts + ' header/footer dibuang');
+        if (pendingImportReport.tocPagesSkipped) reportBits.push(pendingImportReport.tocPagesSkipped + ' halaman isi kandungan diasingkan');
         if (pendingImportReport.paragraphs) reportBits.push(pendingImportReport.paragraphs + ' perenggan');
         if (pendingImportReport.hiddenHyphenArtifacts) reportBits.push(pendingImportReport.hiddenHyphenArtifacts + ' tanda sempang dipulihkan');
         if (pendingImportReport.suspiciousLongTokens) reportBits.push(pendingImportReport.suspiciousLongTokens + ' token perlu semakan');
         const detail = reportBits.length ? ' · ' + reportBits.join(' · ') : '';
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent);font-weight:700;">✓ Struktur siap</span> — ' + pendingBookChapters.length + ' bab dikesan' + detail + '.';
+        const detectedChapters = pendingBookChapters.filter(function(ch) { return ch && ch.kind === 'chapter'; }).length || pendingBookChapters.length;
+        const detectedFrontMatter = pendingBookChapters.filter(function(ch) { return ch && ch.kind === 'frontmatter'; }).length;
+        const structureDetail = detectedFrontMatter ? ' · ' + detectedFrontMatter + ' bahagian awal diasingkan' : '';
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent);font-weight:700;">✓ Struktur siap</span> — ' + detectedChapters + ' bab dikesan' + structureDetail + detail + '.';
         if (uploadLabel) uploadLabel.innerHTML = '✓ ' + escapeHtml(file.name) + '<input type="file" accept=".docx,.pdf" style="display:none;" onchange="handleBookFileUpload(event)">';
         if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
       } catch (err) {
@@ -2330,7 +2370,11 @@ TAMAT`
         if (!block || !block.text) return;
         const text = normalizeImportedText(block.text);
         if (!text || isGenericPageArtifact(text, bookTitle)) return;
-        out.push({ type: block.type || 'paragraph', level: block.level || null, text: text });
+        out.push(Object.assign({}, block, {
+          type: block.type || 'paragraph',
+          level: block.level || null,
+          text: text
+        }));
       });
       return out;
     }
@@ -2406,37 +2450,43 @@ TAMAT`
       const parsed = new DOMParser().parseFromString(result.value, 'text/html');
       const blocks = [];
 
-      function addBlock(type, text, level) {
+      function addBlock(type, text, level, sourceTag) {
         const clean = normalizeImportedText(text);
         if (!clean) return;
-        blocks.push({ type: type, level: level || null, text: clean });
+        blocks.push({ type: type, level: level || null, text: clean, sourceTag: sourceTag || null });
       }
 
       function visit(node) {
         if (!node || node.nodeType !== 1) return;
         const tag = node.tagName.toLowerCase();
+        const preservedText = nodeTextPreservingBreaks(node);
         if (/^h[1-6]$/.test(tag)) {
-          addBlock('heading', nodeTextPreservingBreaks(node), parseInt(tag.slice(1), 10));
+          addBlock('heading', preservedText, parseInt(tag.slice(1), 10), tag);
           return;
         }
         if (tag === 'p') {
-          addBlock('paragraph', nodeTextPreservingBreaks(node));
+          const clean = normalizeImportedText(preservedText);
+          if (looksLikeChapterHeading(clean)) addBlock('heading', clean, 1, tag);
+          else if (isTocHeadingText(clean) || isFrontMatterSectionHeading(clean)) addBlock('heading', clean, 2, tag);
+          else addBlock('paragraph', clean, null, tag);
           return;
         }
         if (tag === 'blockquote') {
-          addBlock('quote', nodeTextPreservingBreaks(node));
+          addBlock('quote', preservedText, null, tag);
           return;
         }
         if (tag === 'ul' || tag === 'ol') {
           Array.prototype.forEach.call(node.children, function(li) {
-            if (li.tagName && li.tagName.toLowerCase() === 'li') addBlock('listItem', nodeTextPreservingBreaks(li));
+            if (li.tagName && li.tagName.toLowerCase() === 'li') addBlock('listItem', nodeTextPreservingBreaks(li), null, 'li');
           });
           return;
         }
         if (tag === 'table') {
           Array.prototype.forEach.call(node.querySelectorAll('tr'), function(tr) {
-            const cells = Array.prototype.map.call(tr.querySelectorAll('th,td'), function(cell) { return normalizeImportedText(nodeTextPreservingBreaks(cell)); }).filter(Boolean);
-            if (cells.length) addBlock('paragraph', cells.join(' | '));
+            const cells = Array.prototype.map.call(tr.querySelectorAll('th,td'), function(cell) {
+              return normalizeImportedText(nodeTextPreservingBreaks(cell));
+            }).filter(Boolean);
+            if (cells.length) addBlock('paragraph', cells.join(' | '), null, 'tr');
           });
           return;
         }
@@ -2503,7 +2553,8 @@ TAMAT`
           pageWidth: viewport.width,
           pageHeight: viewport.height
         });
-        pages.push({ pageNum: pageNum, width: viewport.width, height: viewport.height, rows: rows });
+        const pageModel = { pageNum: pageNum, width: viewport.width, height: viewport.height, rows: rows, isToc: false };
+        pages.push(pageModel);
         rows.forEach(function(row) {
           if (!row.inTopMargin && !row.inBottomMargin) allBodyHeights.push(row.height);
         });
@@ -2521,6 +2572,10 @@ TAMAT`
       if (!pages.some(function(p) { return p.rows.length; })) {
         throw new Error('PDF ini tidak mempunyai lapisan teks. Gunakan PDF teks asal atau jalankan OCR terlebih dahulu.');
       }
+
+      // Detect contents pages before filtering. Chapter names listed in a table of
+      // contents are references, not real chapter boundaries.
+      pages.forEach(function(page) { page.isToc = isLikelyTocPage(page.rows); });
 
       const sortedHeights = allBodyHeights.slice().sort(function(a, b) { return a - b; });
       const medianHeight = sortedHeights.length ? sortedHeights[Math.floor(sortedHeights.length / 2)] : 12;
@@ -2548,17 +2603,13 @@ TAMAT`
           sourceType: 'pdf',
           importVersion: IMPORT_SCHEMA_VERSION,
           pages: pdf.numPages,
+          tocPagesSkipped: pages.filter(function(p) { return p.isToc; }).length,
           removedArtifacts: removedArtifacts,
           paragraphs: blocks.filter(function(b) { return b.type === 'paragraph'; }).length,
           suspiciousLongTokens: quality.suspiciousLongTokens,
           hiddenHyphenArtifacts: quality.hiddenHyphenArtifacts
         }
       };
-    }
-
-    function medianPdfValue(values, fallback) {
-      const clean = (values || []).filter(function(v) { return isFinite(v) && v > 0; }).sort(function(a, b) { return a - b; });
-      return clean.length ? clean[Math.floor(clean.length / 2)] : fallback;
     }
 
     function isAlphaNumericEdge(ch) {
@@ -2657,15 +2708,6 @@ TAMAT`
       });
 
       const candidates = [geometric, rawJoin, spacedJoin].map(normalizeImportedText);
-      // The scoring heuristic below is tuned for long body prose (penalising very long
-      // "words", rewarding sentence punctuation patterns, etc). For short lines — which is
-      // exactly what titles and headings are — that scoring is unreliable and can end up
-      // picking the no-space candidate (e.g. "BUKANHERO" instead of "BUKAN HERO"). For short
-      // lines, trust the geometric (coordinate-gap-based) join directly instead of scoring.
-      const totalLetters = geometric.replace(/[^A-Za-zÀ-ÖØ-öø-ÿĀ-ž]/g, '').length;
-      if (totalLetters > 0 && totalLetters <= 40) {
-        return geometric;
-      }
       candidates.sort(function(a, b) { return scorePdfLineCandidate(a) - scorePdfLineCandidate(b); });
       return candidates[0];
     }
@@ -2714,8 +2756,8 @@ TAMAT`
           pageNum: meta.pageNum,
           pageWidth: meta.pageWidth,
           pageHeight: meta.pageHeight,
-          inTopMargin: y >= meta.pageHeight * 0.84,
-          inBottomMargin: y <= meta.pageHeight * 0.16
+          inTopMargin: y >= meta.pageHeight * 0.92,
+          inBottomMargin: y <= meta.pageHeight * 0.08
         };
       }).filter(function(row) { return row.text; });
     }
@@ -2744,16 +2786,17 @@ TAMAT`
     }
 
     function isPdfMarginArtifact(row, repeatedSignatures) {
-      if (!row || (!row.inTopMargin && !row.inBottomMargin)) return false;
+      if (!row) return false;
       const text = normalizeImportedText(row.text);
       const sig = normalizeArtifactSignature(text);
-      if (/^\d{1,5}$/.test(text)) return true;
+
+      // Strong page artefact patterns are safe to remove regardless of their
+      // precise vertical coordinate. This avoids using a wide top-margin band
+      // that previously deleted real chapter titles placed near the top of a page.
       if (/^(?:page|halaman)\s+\d{1,5}/i.test(text)) return true;
-      if (repeatedSignatures && repeatedSignatures[sig]) return true;
-      // A title followed by a separator and changing page number is a standard
-      // running footer even if the PDF contains too few pages for repetition
-      // statistics to become conclusive.
-      if (/^.{2,120}\s*(?:[·•|]|\s[-–—]\s)\s*\d{1,5}$/.test(text)) return true;
+      if (/^.{2,140}\s*(?:[·•|]|\s[-–—]\s)\s*\d{1,5}$/.test(text)) return true;
+      if (/^\d{1,5}$/.test(text) && (row.inTopMargin || row.inBottomMargin)) return true;
+      if ((row.inTopMargin || row.inBottomMargin) && repeatedSignatures && repeatedSignatures[sig]) return true;
       return false;
     }
 
@@ -2764,6 +2807,95 @@ TAMAT`
 
     function endsSentence(text) {
       return /[.!?…:;”’\"']\s*$/.test(String(text || ''));
+    }
+
+    function isTocHeadingText(text) {
+      const s = normalizeImportedText(text);
+      return /^(?:isi\s+kandungan|kandungan|table\s+of\s+contents)(?:\s*\([^)]*\))?$/i.test(s);
+    }
+
+    function isFrontMatterSectionHeading(text) {
+      const s = normalizeImportedText(text);
+      return /^(?:nota\s+penulis|kata\s+pengantar|prakata|dedikasi|penghargaan|tentang\s+penulis|sinopsis)$/i.test(s);
+    }
+
+    function parseChapterNumber(text) {
+      const m = normalizeImportedText(text).match(/^\s*(?:bab|bahagian|chapter|part)\s+(\d+)\b/i);
+      return m ? parseInt(m[1], 10) : null;
+    }
+
+    function isLikelyTocPage(rows) {
+      const list = (rows || []).filter(function(row) { return row && row.text; });
+      if (list.some(function(row) { return isTocHeadingText(row.text); })) return true;
+      let chapterEntries = 0;
+      let numberedEntries = 0;
+      list.forEach(function(row) {
+        const text = normalizeImportedText(row.text);
+        const stripped = text.replace(/(?:\.{2,}|\s)\s*\d{1,4}\s*$/, '').trim();
+        if (looksLikeChapterHeading(stripped)) {
+          chapterEntries++;
+          if (/\d{1,4}\s*$/.test(text)) numberedEntries++;
+        }
+      });
+      return chapterEntries >= 4 && numberedEntries >= Math.max(3, Math.floor(chapterEntries * 0.5));
+    }
+
+    function hasMeaningfulProseAfter(blocks, index) {
+      let chars = 0;
+      for (let i = index + 1; i < blocks.length && i <= index + 45; i++) {
+        const text = normalizeImportedText(blocks[i] && blocks[i].text);
+        if (!text) continue;
+        if (isFrontMatterSectionHeading(text) || isTocHeadingText(text)) break;
+        if (looksLikeChapterHeading(text)) return chars >= 180;
+        if ((blocks[i].type || 'paragraph') !== 'heading') chars += text.length;
+        if (chars >= 180) return true;
+      }
+      return chars >= 180;
+    }
+
+    function removeTocBlocks(blocks) {
+      const out = [];
+      let inToc = false;
+      let tocEntries = 0;
+      let lastNumber = null;
+
+      (blocks || []).forEach(function(block, index) {
+        const text = normalizeImportedText(block && block.text);
+        if (!text) return;
+        if (block.isTocPage) return;
+        if (isTocHeadingText(text)) {
+          inToc = true;
+          tocEntries = 0;
+          lastNumber = null;
+          return;
+        }
+        if (inToc) {
+          if (isFrontMatterSectionHeading(text)) {
+            inToc = false;
+            out.push(block);
+            return;
+          }
+          if (looksLikeChapterHeading(text)) {
+            const number = parseChapterNumber(text);
+            const resetToRealChapter = tocEntries >= 2 && number !== null &&
+              (number === 1 || (lastNumber !== null && number <= lastNumber)) &&
+              hasMeaningfulProseAfter(blocks, index);
+            if (resetToRealChapter) {
+              inToc = false;
+              out.push(block);
+              return;
+            }
+            tocEntries++;
+            if (number !== null) lastNumber = number;
+            return;
+          }
+          // Contents-page continuation labels, dot leaders and page numbers are
+          // intentionally omitted because the app supplies its own chapter menu.
+          return;
+        }
+        out.push(block);
+      });
+      return out;
     }
 
     function looksLikeChapterHeading(text) {
@@ -2777,7 +2909,13 @@ TAMAT`
       const b = normalizeImportedText(next);
       if (!a) return b;
       if (!b) return a;
-      if (/[-‐‑]\s*$/.test(a)) return a + b;
+      if (/[-‐‑]\s*$/.test(a)) {
+        const leftWord = (a.match(/([A-Za-zÀ-ÖØ-öø-ÿĀ-ž]+)[-‐‑]\s*$/) || [])[1] || '';
+        const rightWord = (b.match(/^([A-Za-zÀ-ÖØ-öø-ÿĀ-ž]+)/) || [])[1] || '';
+        const keepHyphen = leftWord && rightWord &&
+          (leftWord.toLowerCase() === rightWord.toLowerCase() || leftWord.length <= 4);
+        return keepHyphen ? a + b : a.replace(/[-‐‑]\s*$/, '') + b;
+      }
       if (/^[,.;:!?%)\]}”’]/.test(b)) return a + b;
       return a + ' ' + b;
     }
@@ -2791,23 +2929,34 @@ TAMAT`
       function flushParagraph() {
         if (!currentParagraph) return;
         const text = normalizeImportedText(currentParagraph.text);
-        if (text) blocks.push({ type: currentParagraph.type || 'paragraph', text: text });
+        if (text) blocks.push(Object.assign({}, currentParagraph, { text: text }));
         currentParagraph = null;
       }
 
       (pages || []).forEach(function(page) {
-        const bodyRows = page.rows.filter(function(row) { return !row.inTopMargin && !row.inBottomMargin; });
+        if (page.isToc) {
+          flushParagraph();
+          previousRow = null;
+          previousPageNum = page.pageNum;
+          return;
+        }
+
+        // Do not discard a broad top/bottom band. Real chapter headings in the
+        // supplied novels sit around 9-10% from the top and were previously lost
+        // because the old engine treated the top 16% as a header zone.
+        const bodyRows = page.rows.slice();
         const candidateLefts = bodyRows.filter(function(row) {
           return row.height <= medianHeight * 1.22 && row.text.length >= 25;
         }).map(function(row) { return row.x; });
         const bodyLeft = medianNumber(candidateLefts, medianNumber(bodyRows.map(function(r) { return r.x; }), 0));
         const indentThreshold = Math.max(9, medianHeight * 0.85);
 
-        bodyRows.forEach(function(row, index) {
+        bodyRows.forEach(function(row) {
           const isNewPage = previousPageNum !== null && page.pageNum !== previousPageNum;
           const text = normalizeImportedText(row.text);
           if (!text) return;
-          const heading = looksLikeChapterHeading(text) || (row.height > medianHeight * 1.28 && text.length < 100);
+          const semanticHeading = looksLikeChapterHeading(text) || isFrontMatterSectionHeading(text) || isTocHeadingText(text);
+          const heading = semanticHeading || (row.height > medianHeight * 1.28 && text.length < 100);
           const listItem = /^[•●▪◦*-]\s+/.test(text);
           const gap = (!isNewPage && previousRow) ? Math.abs(previousRow.y - row.y) : null;
           const largeGap = gap !== null && gap > normalLineGap * 1.42;
@@ -2815,10 +2964,25 @@ TAMAT`
 
           if (heading) {
             flushParagraph();
-            blocks.push({ type: 'heading', level: looksLikeChapterHeading(text) ? 1 : 2, text: text.replace(/\s+\d{1,5}\s*$/, '').trim() });
+            blocks.push({
+              type: 'heading',
+              level: looksLikeChapterHeading(text) ? 1 : 2,
+              text: text.replace(/\s+\d{1,5}\s*$/, '').trim(),
+              pageNum: page.pageNum,
+              sourceY: row.y,
+              sourceHeight: row.height,
+              isTocPage: false
+            });
           } else if (listItem) {
             flushParagraph();
-            blocks.push({ type: 'listItem', text: text.replace(/^[•●▪◦*-]\s+/, '') });
+            blocks.push({
+              type: 'listItem',
+              text: text.replace(/^[•●▪◦*-]\s+/, ''),
+              pageNum: page.pageNum,
+              sourceY: row.y,
+              sourceHeight: row.height,
+              isTocPage: false
+            });
           } else {
             let startNew = !currentParagraph;
             if (!startNew && largeGap) startNew = true;
@@ -2826,9 +2990,18 @@ TAMAT`
             if (!startNew && isNewPage && indented && endsSentence(currentParagraph.text)) startNew = true;
             if (startNew) {
               flushParagraph();
-              currentParagraph = { type: 'paragraph', text: text };
+              currentParagraph = {
+                type: 'paragraph',
+                text: text,
+                pageNum: page.pageNum,
+                endPageNum: page.pageNum,
+                sourceY: row.y,
+                sourceHeight: row.height,
+                isTocPage: false
+              };
             } else {
               currentParagraph.text = appendWrappedText(currentParagraph.text, text);
+              currentParagraph.endPageNum = page.pageNum;
             }
           }
           previousRow = row;
@@ -2853,59 +3026,60 @@ TAMAT`
     }
 
     function structuredBlocksToChapters(blocks) {
-      const clean = cleanBlocksForDisplay(blocks, '');
+      const clean = removeTocBlocks(cleanBlocksForDisplay(blocks, ''));
       if (!clean.length) return [];
 
-      // Prefer headings that actually look like chapter markers ("Bab 1", "Chapter 2",
-      // "Prolog", etc). Only fall back to using ANY level-1 heading as a chapter boundary
-      // if the document contains none of those markers at all — otherwise front-matter
-      // sections (title page, copyright notice, fiction disclaimer, publisher's note) that
-      // happen to be formatted as large/bold text get misidentified as chapters.
-      const explicitCandidateIndexes = [];
-      clean.forEach(function(block, index) {
-        if (block.type === 'heading' && looksLikeChapterHeading(block.text)) explicitCandidateIndexes.push(index);
-      });
+      const sections = [];
+      let current = { title: 'Maklumat Buku', kind: 'frontmatter', chapterNumber: null, blocks: [] };
 
-      const candidateIndexes = explicitCandidateIndexes.length ? explicitCandidateIndexes : (function() {
-        const fallback = [];
-        clean.forEach(function(block, index) {
-          if (block.type === 'heading' && block.level === 1) fallback.push(index);
-        });
-        return fallback;
-      })();
-
-      // Filter heading-like entries from a table of contents. This length check only
-      // matters for the loose level-1 fallback (which can pick up TOC entries formatted
-      // as headings); explicit "Bab N"/"Chapter N" matches are already a strong enough
-      // signal and should not be dropped just for being a short chapter.
-      const usingExplicitMarkers = explicitCandidateIndexes.length > 0;
-      const real = [];
-      candidateIndexes.forEach(function(index, pos) {
-        if (usingExplicitMarkers) { real.push(index); return; }
-        const next = pos + 1 < candidateIndexes.length ? candidateIndexes[pos + 1] : clean.length;
-        let chars = 0;
-        for (let i = index + 1; i < next; i++) chars += (clean[i].text || '').length;
-        if (chars >= 250 || pos === candidateIndexes.length - 1) real.push(index);
-      });
-
-      if (!real.length) {
-        return [{ title: 'Bab 1', blocks: clean, content: blocksToPlainText(clean) }];
-      }
-
-      const chapters = [];
-      if (real[0] > 0) {
-        const preface = clean.slice(0, real[0]).filter(function(b) { return b.type !== 'heading' || b.text; });
-        if (preface.some(function(b) { return b.text && b.text.length > 20; })) {
-          chapters.push({ title: 'Pengenalan', blocks: preface, content: blocksToPlainText(preface) });
+      function flushCurrent() {
+        if (!current) return;
+        const contentBlocks = cleanBlocksForDisplay(current.blocks, '');
+        if (contentBlocks.some(function(block) { return block.text && block.text.length > 0; })) {
+          sections.push({
+            title: current.title,
+            kind: current.kind,
+            chapterNumber: current.chapterNumber || null,
+            blocks: contentBlocks,
+            content: blocksToPlainText(contentBlocks)
+          });
         }
+        current = null;
       }
-      real.forEach(function(index, pos) {
-        const end = pos + 1 < real.length ? real[pos + 1] : clean.length;
-        const title = normalizeImportedText(clean[index].text).replace(/\s+\d{1,5}\s*$/, '').trim();
-        const chapterBlocks = clean.slice(index + 1, end);
-        if (chapterBlocks.length) chapters.push({ title: title || ('Bab ' + (chapters.length + 1)), blocks: chapterBlocks, content: blocksToPlainText(chapterBlocks) });
+
+      clean.forEach(function(block) {
+        const text = normalizeImportedText(block.text);
+        if (looksLikeChapterHeading(text)) {
+          flushCurrent();
+          current = {
+            title: text.replace(/\s+\d{1,5}\s*$/, '').trim(),
+            kind: 'chapter',
+            chapterNumber: parseChapterNumber(text),
+            blocks: []
+          };
+          return;
+        }
+        if (isFrontMatterSectionHeading(text)) {
+          flushCurrent();
+          current = {
+            title: text.replace(/\b\w/g, function(letter) { return letter.toUpperCase(); }),
+            kind: 'frontmatter',
+            chapterNumber: null,
+            blocks: []
+          };
+          return;
+        }
+        if (!current) current = { title: 'Maklumat Buku', kind: 'frontmatter', chapterNumber: null, blocks: [] };
+        current.blocks.push(block);
       });
-      return chapters.length ? chapters : [{ title: 'Bab 1', blocks: clean, content: blocksToPlainText(clean) }];
+      flushCurrent();
+
+      const chapterCount = sections.filter(function(section) { return section.kind === 'chapter'; }).length;
+      if (!chapterCount) {
+        const allBlocks = sections.reduce(function(acc, section) { return acc.concat(section.blocks || []); }, []);
+        return [{ title: 'Bab 1', kind: 'chapter', chapterNumber: 1, blocks: allBlocks, content: blocksToPlainText(allBlocks) }];
+      }
+      return sections;
     }
 
     function blocksToPlainText(blocks) {
