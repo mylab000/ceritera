@@ -2657,6 +2657,15 @@ TAMAT`
       });
 
       const candidates = [geometric, rawJoin, spacedJoin].map(normalizeImportedText);
+      // The scoring heuristic below is tuned for long body prose (penalising very long
+      // "words", rewarding sentence punctuation patterns, etc). For short lines — which is
+      // exactly what titles and headings are — that scoring is unreliable and can end up
+      // picking the no-space candidate (e.g. "BUKANHERO" instead of "BUKAN HERO"). For short
+      // lines, trust the geometric (coordinate-gap-based) join directly instead of scoring.
+      const totalLetters = geometric.replace(/[^A-Za-zÀ-ÖØ-öø-ÿĀ-ž]/g, '').length;
+      if (totalLetters > 0 && totalLetters <= 40) {
+        return geometric;
+      }
       candidates.sort(function(a, b) { return scorePdfLineCandidate(a) - scorePdfLineCandidate(b); });
       return candidates[0];
     }
@@ -2846,15 +2855,33 @@ TAMAT`
     function structuredBlocksToChapters(blocks) {
       const clean = cleanBlocksForDisplay(blocks, '');
       if (!clean.length) return [];
-      const candidateIndexes = [];
+
+      // Prefer headings that actually look like chapter markers ("Bab 1", "Chapter 2",
+      // "Prolog", etc). Only fall back to using ANY level-1 heading as a chapter boundary
+      // if the document contains none of those markers at all — otherwise front-matter
+      // sections (title page, copyright notice, fiction disclaimer, publisher's note) that
+      // happen to be formatted as large/bold text get misidentified as chapters.
+      const explicitCandidateIndexes = [];
       clean.forEach(function(block, index) {
-        if (block.type === 'heading' && (looksLikeChapterHeading(block.text) || block.level === 1)) candidateIndexes.push(index);
+        if (block.type === 'heading' && looksLikeChapterHeading(block.text)) explicitCandidateIndexes.push(index);
       });
 
-      // Filter heading-like entries from a table of contents. Real chapters have
-      // meaningful prose after them; TOC entries usually do not.
+      const candidateIndexes = explicitCandidateIndexes.length ? explicitCandidateIndexes : (function() {
+        const fallback = [];
+        clean.forEach(function(block, index) {
+          if (block.type === 'heading' && block.level === 1) fallback.push(index);
+        });
+        return fallback;
+      })();
+
+      // Filter heading-like entries from a table of contents. This length check only
+      // matters for the loose level-1 fallback (which can pick up TOC entries formatted
+      // as headings); explicit "Bab N"/"Chapter N" matches are already a strong enough
+      // signal and should not be dropped just for being a short chapter.
+      const usingExplicitMarkers = explicitCandidateIndexes.length > 0;
       const real = [];
       candidateIndexes.forEach(function(index, pos) {
+        if (usingExplicitMarkers) { real.push(index); return; }
         const next = pos + 1 < candidateIndexes.length ? candidateIndexes[pos + 1] : clean.length;
         let chars = 0;
         for (let i = index + 1; i < next; i++) chars += (clean[i].text || '').length;
