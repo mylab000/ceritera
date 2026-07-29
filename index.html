@@ -2737,6 +2737,11 @@ TAMAT`
       };
     }
 
+    function medianPdfValue(values, fallback) {
+      const clean = (values || []).filter(function(v) { return Number.isFinite(v) && v > 0; }).sort(function(a, b) { return a - b; });
+      return clean.length ? clean[Math.floor(clean.length / 2)] : fallback;
+    }
+
     function isAlphaNumericEdge(ch) {
       return /[A-Za-z0-9À-ÖØ-öø-ÿĀ-ž]/.test(ch || '');
     }
