@@ -719,7 +719,7 @@
   </section>
 </main>
 
-<footer>Ceritera &middot; Import Struktur Sebenar V5 &middot; Perpustakaan e-buku peribadi, jalan 100% dalam pelayar.</footer>
+<footer>Ceritera &middot; Import Sempadan Ketat V6 &middot; Perpustakaan e-buku peribadi, jalan 100% dalam pelayar.</footer>
 </div>
 <div id="modalRoot"></div>
 
@@ -1840,9 +1840,33 @@ TAMAT`
     }
 
     // ---------- Reader ----------
+    function isLegacyImportedBook(book) {
+      if (!book || isBuiltInTitle(book.title)) return false;
+      // Books imported before V6 did not persist structural metadata in cloud.
+      // Their missing chapter headings cannot be reconstructed after the source
+      // file has been discarded, so the app must require a clean re-import.
+      return !Number(book.importVersion || 0) || Number(book.importVersion || 0) < IMPORT_SCHEMA_VERSION;
+    }
+
+    function showLegacyImportWarning(book) {
+      let html = '<div class="modal-overlay" onclick="closeAppModal(event)"><div class="modal" onclick="event.stopPropagation()">';
+      html += '<div class="modal-header"><span class="modal-title">Import lama dikesan</span><button class="close-btn" onclick="closeAppModal()">✕</button></div>';
+      html += '<div style="font-size:14px;line-height:1.65;color:var(--ink);">Salinan <strong>' + escapeHtml(book.title) + '</strong> ini datang daripada enjin import lama. Struktur yang sudah hilang—termasuk sempadan Nota Penulis dan Bab 1—tidak boleh dipulihkan daripada teks tersimpan.</div>';
+      html += '<div style="margin-top:10px;font-size:13px;color:var(--muted);">Muat naik semula fail PDF atau DOCX asal. Ceritera V6 akan menggantikan semua salinan lama dengan tajuk yang sama secara automatik.</div>';
+      html += '<div class="modal-actions"><button type="button" class="btn-cancel" onclick="closeAppModal()">Tutup</button><button type="button" class="btn-lang active" style="flex:1" onclick="closeAppModal();openAddBookModal();">Import Semula</button></div>';
+      html += '</div></div>';
+      document.getElementById('modalRoot').innerHTML = html;
+    }
+
     async function openReader(bookIndex) {
       currentBookIndex = bookIndex;
       currentChapterIndex = 0;
+      const selectedBook = featuredBooks[bookIndex];
+      if (isLegacyImportedBook(selectedBook)) {
+        currentBookIndex = null;
+        showLegacyImportWarning(selectedBook);
+        return;
+      }
       document.getElementById('libraryView').style.display = 'none';
       document.getElementById('readerView').style.display = 'block';
       document.body.classList.add('reading');
@@ -2013,6 +2037,37 @@ TAMAT`
     // ==================== CLOUD SYNC ====================
     function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 
+    function normalizeBookKey(title) {
+      return String(title || '')
+        .normalize('NFKC')
+        .toLowerCase()
+        .replace(/[^a-z0-9\u00c0-\u024f]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function isBuiltInTitle(title) {
+      const key = normalizeBookKey(title);
+      return defaultBooks.some(function(book) { return normalizeBookKey(book.title) === key; });
+    }
+
+    function dedupeBooksByTitle(books) {
+      const chosen = {};
+      (books || []).forEach(function(book) {
+        const key = normalizeBookKey(book && book.title);
+        if (!key) return;
+        const stamp = Date.parse(book.importedAt || book.createdAt || '') || 0;
+        const previous = chosen[key];
+        const previousStamp = previous ? (Date.parse(previous.importedAt || previous.createdAt || '') || 0) : -1;
+        // Prefer a V6+ import, then the newest record. This prevents an old,
+        // corrupted duplicate from appearing beside the freshly re-imported copy.
+        const rank = (book.importVersion || 0) * 10000000000000 + stamp;
+        const previousRank = previous ? ((previous.importVersion || 0) * 10000000000000 + previousStamp) : -1;
+        if (!previous || rank >= previousRank) chosen[key] = book;
+      });
+      return Object.keys(chosen).map(function(key) { return chosen[key]; });
+    }
+
     async function cloudLoadBooks() {
       if (!supabaseClient || !currentUser) return null;
       const { data: books, error: booksErr } = await supabaseClient
@@ -2021,14 +2076,38 @@ TAMAT`
       const { data: chapters, error: chErr } = await supabaseClient
         .from('ceritera_chapters').select('*').eq('user_id', currentUser.id).order('chapter_order', { ascending: true });
       if (chErr) { console.error('Gagal muat bab', chErr); return null; }
-      return books.map(b => ({
-        id: b.id,
-        title: b.title,
-        author: b.author,
-        lang: b.lang,
-        emoji: b.emoji,
-        chapters: chapters.filter(c => c.book_id === b.id).map(c => ({ title: c.title, content: c.content }))
-      }));
+
+      const loaded = books.map(function(b) {
+        const rows = chapters.filter(function(c) { return c.book_id === b.id; });
+        const metaRow = rows.find(function(c) { return c.title === '__CERITERA_META_V6__'; });
+        let meta = {};
+        if (metaRow) {
+          try { meta = JSON.parse(metaRow.content || '{}') || {}; } catch (e) { meta = {}; }
+        }
+        const visibleRows = rows.filter(function(c) { return c.title !== '__CERITERA_META_V6__'; });
+        const sectionKinds = Array.isArray(meta.sectionKinds) ? meta.sectionKinds : [];
+        return {
+          id: b.id,
+          title: b.title,
+          author: b.author,
+          lang: b.lang,
+          emoji: b.emoji,
+          createdAt: b.created_at || null,
+          sourceType: meta.sourceType || null,
+          sourceFile: meta.sourceFile || null,
+          importedAt: meta.importedAt || b.created_at || null,
+          importVersion: Number(meta.importVersion || 0),
+          importReport: meta.importReport || null,
+          chapters: visibleRows.map(function(c, index) {
+            return {
+              title: c.title,
+              content: c.content,
+              kind: sectionKinds[index] || (/^(?:nota penulis|kata pengantar|prakata|dedikasi|penghargaan|tentang penulis|sinopsis|maklumat buku)$/i.test(c.title || '') ? 'frontmatter' : 'chapter')
+            };
+          })
+        };
+      });
+      return dedupeBooksByTitle(loaded);
     }
 
     async function cloudCreateBook(book) {
@@ -2040,8 +2119,22 @@ TAMAT`
       if (error) { console.error('Gagal cipta buku', error); return null; }
       const bookId = data.id;
       if (book.chapters && book.chapters.length) {
-        const rows = book.chapters.map((c, i) => ({
-          book_id: bookId, user_id: currentUser.id, chapter_order: i, title: c.title, content: c.content
+        const meta = {
+          importVersion: Number(book.importVersion || IMPORT_SCHEMA_VERSION),
+          sourceType: book.sourceType || 'upload',
+          sourceFile: book.sourceFile || pendingBookFileName || '',
+          importedAt: book.importedAt || new Date().toISOString(),
+          sectionKinds: book.chapters.map(function(c) { return c && c.kind ? c.kind : 'chapter'; }),
+          importReport: book.importReport || null
+        };
+        const rows = [{
+          book_id: bookId, user_id: currentUser.id, chapter_order: 0,
+          title: '__CERITERA_META_V6__', content: JSON.stringify(meta)
+        }].concat(book.chapters.map(function(c, i) {
+          return {
+            book_id: bookId, user_id: currentUser.id, chapter_order: i + 1,
+            title: c.title, content: c.content
+          };
         }));
         const { error: chErr } = await supabaseClient.from('ceritera_chapters').insert(rows);
         if (chErr) console.error('Gagal simpan bab', chErr);
@@ -2051,9 +2144,35 @@ TAMAT`
 
     async function cloudDeleteBook(bookId) {
       if (!supabaseClient || !currentUser) return false;
-      const { error } = await supabaseClient.from('ceritera_books').delete().eq('id', bookId).eq('user_id', currentUser.id);
-      if (error) { console.error('Gagal padam buku', error); return false; }
-      return true;
+      try {
+        await supabaseClient.from('ceritera_progress').delete().eq('book_id', bookId).eq('user_id', currentUser.id);
+        const chapterDelete = await supabaseClient.from('ceritera_chapters').delete().eq('book_id', bookId).eq('user_id', currentUser.id);
+        if (chapterDelete.error) throw chapterDelete.error;
+        const bookDelete = await supabaseClient.from('ceritera_books').delete().eq('id', bookId).eq('user_id', currentUser.id);
+        if (bookDelete.error) throw bookDelete.error;
+        return true;
+      } catch (error) {
+        console.error('Gagal padam buku sepenuhnya', error);
+        return false;
+      }
+    }
+
+    async function removeExistingCopiesByTitle(title) {
+      const key = normalizeBookKey(title);
+      const copies = featuredBooks.filter(function(book) {
+        return normalizeBookKey(book && book.title) === key && !isBuiltInTitle(book && book.title);
+      });
+      if (currentUser) {
+        for (const book of copies) {
+          const ok = await cloudDeleteBook(book.id);
+          if (!ok) throw new Error('Versi lama buku ini tidak dapat dipadam daripada cloud. Cuba log keluar dan masuk semula sebelum mengimport.');
+        }
+      }
+      featuredBooks = featuredBooks.filter(function(book) {
+        return normalizeBookKey(book && book.title) !== key || isBuiltInTitle(book && book.title);
+      });
+      persistLocalBooks();
+      return copies.length;
     }
 
     async function cloudLoadSettings() {
@@ -2116,7 +2235,7 @@ TAMAT`
       } else {
         try {
           const raw = localStorage.getItem('ceriteraBooks');
-          featuredBooks = raw ? JSON.parse(raw) : defaultBooks.map(b => Object.assign({ id: uid() }, b));
+          featuredBooks = raw ? dedupeBooksByTitle(JSON.parse(raw)) : defaultBooks.map(b => Object.assign({ id: uid() }, b));
         } catch (e) {
           featuredBooks = defaultBooks.map(b => Object.assign({ id: uid() }, b));
         }
@@ -2146,11 +2265,13 @@ TAMAT`
     let pendingBookChapters = null;
     let pendingBookFileName = '';
     let pendingImportReport = null;
+    let pendingImportAudit = null;
 
     function openAddBookModal() {
       pendingBookChapters = null;
       pendingBookFileName = '';
       pendingImportReport = null;
+      pendingImportAudit = null;
       let html = '<div class="modal-overlay" onclick="closeAppModal(event)"><div class="modal" onclick="event.stopPropagation()">';
       html += '<div class="modal-header"><span class="modal-title">Tambah Buku Baharu</span><button class="close-btn" onclick="closeAppModal()">✕</button></div>';
       html += '<div id="addBookError"></div>';
@@ -2201,7 +2322,7 @@ TAMAT`
     // does not; it stores positioned glyphs. The PDF path therefore reconstructs
     // reading order from coordinates, detects repeated margin artefacts, and then
     // rebuilds paragraphs before chapters are created.
-    const IMPORT_SCHEMA_VERSION = 5;
+    const IMPORT_SCHEMA_VERSION = 6;
 
     async function handleBookFileUpload(e) {
       const file = e.target.files && e.target.files[0];
@@ -2234,6 +2355,8 @@ TAMAT`
         pendingBookChapters = structuredBlocksToChapters(model.blocks);
         pendingBookFileName = file.name;
         pendingImportReport = model.report || { sourceType: lower.endsWith('.pdf') ? 'pdf' : 'docx' };
+        pendingImportAudit = auditImportedSections(pendingBookChapters);
+        if (!pendingImportAudit.ok) throw new Error('Struktur dokumen gagal audit: ' + pendingImportAudit.errors.join(' '));
 
         const titleInput = document.getElementById('newBookTitle');
         if (titleInput && !titleInput.value.trim()) {
@@ -2251,13 +2374,15 @@ TAMAT`
         const detectedChapters = pendingBookChapters.filter(function(ch) { return ch && ch.kind === 'chapter'; }).length || pendingBookChapters.length;
         const detectedFrontMatter = pendingBookChapters.filter(function(ch) { return ch && ch.kind === 'frontmatter'; }).length;
         const structureDetail = detectedFrontMatter ? ' · ' + detectedFrontMatter + ' bahagian awal diasingkan' : '';
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent);font-weight:700;">✓ Struktur siap</span> — ' + detectedChapters + ' bab dikesan' + structureDetail + detail + '.';
+        const preview = formatStructurePreview(pendingBookChapters);
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent);font-weight:700;">✓ Struktur V6 lulus audit</span> — ' + detectedChapters + ' bab dikesan' + structureDetail + detail + '.<div style="margin-top:7px;font-size:12px;line-height:1.5;color:var(--muted);"><strong>Urutan:</strong> ' + preview + '</div>';
         if (uploadLabel) uploadLabel.innerHTML = '✓ ' + escapeHtml(file.name) + '<input type="file" accept=".docx,.pdf" style="display:none;" onchange="handleBookFileUpload(event)">';
         if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
       } catch (err) {
         pendingBookChapters = null;
         pendingBookFileName = '';
         pendingImportReport = null;
+        pendingImportAudit = null;
         if (statusEl) statusEl.textContent = '';
         if (errEl) errEl.innerHTML = '<div class="form-error">' + escapeHtml(err && err.message ? err.message : 'Gagal memproses fail.') + '</div>';
       } finally {
@@ -2789,6 +2914,7 @@ TAMAT`
       if (!row) return false;
       const text = normalizeImportedText(row.text);
       const sig = normalizeArtifactSignature(text);
+      if (looksLikeChapterHeading(text) || isFrontMatterSectionHeading(text) || isTocHeadingText(text)) return false;
 
       // Strong page artefact patterns are safe to remove regardless of their
       // precise vertical coordinate. This avoids using a wide top-margin band
@@ -2934,6 +3060,10 @@ TAMAT`
       }
 
       (pages || []).forEach(function(page) {
+        if (previousPageNum !== null && page.pageNum !== previousPageNum) {
+          flushParagraph();
+          previousRow = null;
+        }
         if (page.isToc) {
           flushParagraph();
           previousRow = null;
@@ -3025,6 +3155,41 @@ TAMAT`
       return { suspiciousLongTokens: suspiciousLongTokens, hiddenHyphenArtifacts: hiddenHyphenArtifacts };
     }
 
+    function auditImportedSections(sections) {
+      const errors = [];
+      const warnings = [];
+      const list = Array.isArray(sections) ? sections : [];
+      const chapterIndexes = [];
+      list.forEach(function(section, index) {
+        if (section && section.kind === 'chapter') chapterIndexes.push(index);
+      });
+      if (!chapterIndexes.length) errors.push('Tiada sempadan bab sebenar dikesan.');
+      const firstChapterIndex = chapterIndexes.length ? chapterIndexes[0] : -1;
+      if (firstChapterIndex >= 0) {
+        const first = list[firstChapterIndex];
+        if (first.chapterNumber !== null && first.chapterNumber !== 1) {
+          warnings.push('Bab pertama yang dikesan bukan Bab 1.');
+        }
+        list.slice(0, firstChapterIndex).forEach(function(section) {
+          const text = String(section && section.content || '');
+          if (/\bBab\s+1\s*:/i.test(text)) errors.push('Bab 1 masih berada di dalam bahagian awal.');
+        });
+      }
+      list.forEach(function(section) {
+        if (!section) return;
+        if (section.kind === 'frontmatter' && /\bBab\s+\d+\s*:/i.test(String(section.content || ''))) {
+          errors.push('Sempadan bab bercampur dengan ' + (section.title || 'bahagian awal') + '.');
+        }
+      });
+      return { ok: errors.length === 0, errors: errors, warnings: warnings };
+    }
+
+    function formatStructurePreview(sections) {
+      return (sections || []).slice(0, 7).map(function(section) {
+        return escapeHtml(section.title || 'Tanpa tajuk');
+      }).join(' → ') + ((sections || []).length > 7 ? ' → …' : '');
+    }
+
     function structuredBlocksToChapters(blocks) {
       const clean = removeTocBlocks(cleanBlocksForDisplay(blocks, ''));
       if (!clean.length) return [];
@@ -3074,6 +3239,11 @@ TAMAT`
       });
       flushCurrent();
 
+      const boundaryAudit = auditImportedSections(sections);
+      if (!boundaryAudit.ok) {
+        throw new Error('Import dihentikan kerana struktur masih bercampur: ' + boundaryAudit.errors.join(' '));
+      }
+
       const chapterCount = sections.filter(function(section) { return section.kind === 'chapter'; }).length;
       if (!chapterCount) {
         const allBlocks = sections.reduce(function(acc, section) { return acc.concat(section.blocks || []); }, []);
@@ -3103,10 +3273,25 @@ TAMAT`
         return;
       }
 
+      pendingImportAudit = auditImportedSections(pendingBookChapters);
+      if (!pendingImportAudit.ok) {
+        errEl.innerHTML = '<div class="form-error">Buku tidak disimpan kerana sempadan struktur gagal audit: ' + escapeHtml(pendingImportAudit.errors.join(' ')) + '</div>';
+        return;
+      }
+
+      try {
+        await removeExistingCopiesByTitle(title);
+      } catch (replaceError) {
+        errEl.innerHTML = '<div class="form-error">' + escapeHtml(replaceError.message || 'Gagal menggantikan salinan lama.') + '</div>';
+        return;
+      }
+
       const newBook = {
         id: uid(), title, author, lang, emoji,
         chapters: pendingBookChapters,
         sourceType: pendingImportReport && pendingImportReport.sourceType ? pendingImportReport.sourceType : 'upload',
+        sourceFile: pendingBookFileName || '',
+        importedAt: new Date().toISOString(),
         importVersion: IMPORT_SCHEMA_VERSION,
         importReport: pendingImportReport || null
       };
@@ -3135,7 +3320,14 @@ TAMAT`
     }
 
     async function performDeleteBook(bookId) {
-      if (currentUser) await cloudDeleteBook(bookId);
+      if (currentUser) {
+        const removed = await cloudDeleteBook(bookId);
+        if (!removed) {
+          closeAppModal();
+          alert('Buku tidak dapat dipadam daripada cloud. Semak sambungan dan cuba lagi.');
+          return;
+        }
+      }
       featuredBooks = featuredBooks.filter(b => b.id !== bookId);
       persistLocalBooks();
       closeAppModal();
