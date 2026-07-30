@@ -321,7 +321,10 @@
   .modal{ width:100%; max-width:520px; max-height:85vh; overflow-y:auto; background:var(--panel); border:none; border-radius:22px; padding:24px; box-shadow:var(--sh-out); }
   .modal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
   .modal-title{ font-family:var(--display); font-style:italic; font-weight:700; font-size:19px; }
-  .close-btn{ background:none; border:none; font-size:1.2rem; cursor:pointer; color:var(--muted); padding:4px; border-radius:8px; }
+  .close-btn{ background:var(--panel); border:none; box-shadow:var(--sh-out-sm); width:26px; height:26px; min-width:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--muted); padding:0; flex-shrink:0; }
+  .close-btn:hover{ color:var(--ink); }
+  .close-btn:active{ box-shadow:var(--sh-in-sm); }
+  .close-btn svg{ width:12px; height:12px; }
   .form-field{ margin-bottom:14px; }
   .form-field label{ display:block; font-size:12px; font-weight:700; color:var(--muted); margin-bottom:5px; text-transform:uppercase; letter-spacing:0.03em; }
   .form-field input, .form-field select, .form-field textarea{ width:100%; padding:10px 12px; border-radius:12px; border:none; box-shadow:var(--sh-in-sm); font-family:var(--sans); font-size:14px; background:var(--bg); color:var(--ink); box-sizing:border-box; }
@@ -383,25 +386,15 @@
     min-height:128px;
     transition:box-shadow .2s, transform .2s;
     position:relative;
-    box-shadow:var(--sh-out-sm), inset 0 0 0 1.5px transparent;
+    box-shadow:var(--sh-out-sm);
   }
-  /* Rotating palette of "book cover" colours, cycling per card — now used as a
-     soft inset accent ring rather than a hard offset shadow. */
-  .book-card:nth-of-type(6n+1){ --book-shadow:#e0729f; }
-  .book-card:nth-of-type(6n+2){ --book-shadow:#a78bda; }
-  .book-card:nth-of-type(6n+3){ --book-shadow:#e0a96d; }
-  .book-card:nth-of-type(6n+4){ --book-shadow:#7bc4a4; }
-  .book-card:nth-of-type(6n+5){ --book-shadow:#6ba3d6; }
-  .book-card:nth-of-type(6n+6){ --book-shadow:#e08a8a; }
-
-  .book-card{ box-shadow:var(--sh-out-sm), inset 0 0 0 1.5px color-mix(in srgb, var(--book-shadow, var(--accent)) 45%, transparent); }
   .book-card:hover{
     transform:translateY(-3px);
-    box-shadow:var(--sh-out), inset 0 0 0 1.5px var(--book-shadow, var(--accent));
+    box-shadow:var(--sh-out);
   }
   .book-card:active{
     transform:translateY(0);
-    box-shadow:var(--sh-in-sm), inset 0 0 0 1.5px var(--book-shadow, var(--accent));
+    box-shadow:var(--sh-in-sm);
   }
   .book-card-icon{
     font-size:1.5rem; margin-bottom:6px; display:block;
@@ -532,6 +525,62 @@
     font-family:var(--mono); font-size:0.65rem; color:var(--muted);
   }
   @media (prefers-reduced-motion: reduce){ *{ transition:none !important; } }
+
+  /* ================================================================
+     ADAPTIVE LAYOUT — MOBILE / TABLET / KOMPUTER
+     Pangkalan sedia ada (di atas) sudah selamat untuk mobile kecil.
+     Blok di bawah menambah lapisan khusus untuk skrin tablet & komputer
+     supaya ruang skrin besar digunakan dengan baik tanpa menjejaskan
+     keselesaan membaca (lebar teks bab dikekalkan sempit walaupun pada
+     skrin lebar, guna kelas body.reading yang sedia ada).
+     ================================================================ */
+
+  /* ---- Mobile kecil tambahan (telefon sempit, ≤380px) ---- */
+  @media (max-width:380px){
+    h1{ font-size:1.15rem; }
+    .brand-mark{ width:34px; height:34px; font-size:1rem; }
+    .controls-bar{ gap:8px; }
+    .book-grid{ grid-template-columns:repeat(auto-fill, minmax(112px,1fr)); gap:8px; }
+    .theme-modal-grid{ grid-template-columns:repeat(2, 1fr); gap:10px 8px; }
+  }
+
+  /* ---- Tablet (641px – 1024px): iPad mini/air/pro, tablet Android ---- */
+  @media (min-width:641px) and (max-width:1024px){
+    main{ max-width:760px; padding:26px 34px; }
+    header{ padding:20px 32px; }
+    .book-grid{ grid-template-columns:repeat(auto-fill, minmax(168px,1fr)); gap:18px; }
+    .book-title{ font-size:1rem; }
+    .modal{ max-width:560px; }
+    .auth-card{ max-width:420px; }
+  }
+
+  /* ---- Komputer (≥1025px): laptop & monitor sedia ---- */
+  @media (min-width:1025px){
+    main{ max-width:1040px; padding:38px 44px; }
+    header{ padding:22px 44px; }
+    .book-grid{ grid-template-columns:repeat(auto-fill, minmax(178px,1fr)); gap:22px; }
+    .book-card{ min-height:150px; padding:18px 15px 15px; }
+    .book-card:hover{ transform:translateY(-5px); }
+    .book-title{ font-size:1.05rem; }
+    .theme-modal-grid{ grid-template-columns:repeat(4, 1fr); }
+    .modal{ max-width:600px; }
+    .auth-card{ max-width:440px; }
+  }
+
+  /* ---- Monitor sangat lebar (≥1440px): elak kandungan meregang tepi-ke-tepi ---- */
+  @media (min-width:1440px){
+    main{ max-width:1200px; }
+    .book-grid{ grid-template-columns:repeat(auto-fill, minmax(190px,1fr)); gap:24px; }
+  }
+
+  /* ---- Paparan bab (reader): lebar teks dikekalkan selesa dibaca pada
+     SEMUA saiz skrin ≥641px, tidak kira betapa lebar monitor ---- */
+  @media (min-width:641px) and (max-width:1024px){
+    body.reading main{ max-width:640px; }
+  }
+  @media (min-width:1025px){
+    body.reading main{ max-width:700px; padding-top:44px; }
+  }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
@@ -1688,7 +1737,7 @@ TAMAT`
     // anchored dropdown — this fixes it being cramped / clipped / hard to tap on mobile.
     function openThemeModal() {
       let html = '<div class="modal-overlay" onclick="closeAppModal(event)"><div class="modal" onclick="event.stopPropagation()">';
-      html += '<div class="modal-header"><span class="modal-title">🎨 Warna Tema</span><button class="close-btn" onclick="closeAppModal()">✕</button></div>';
+      html += '<div class="modal-header"><span class="modal-title">🎨 Warna Tema</span><button class="close-btn" onclick="closeAppModal()" title="Tutup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>';
       html += '<div id="themeModalBody"></div>';
       html += '</div></div>';
       document.getElementById('modalRoot').innerHTML = html;
@@ -1857,7 +1906,7 @@ TAMAT`
 
     function showLegacyImportWarning(book) {
       let html = '<div class="modal-overlay" onclick="closeAppModal(event)"><div class="modal" onclick="event.stopPropagation()">';
-      html += '<div class="modal-header"><span class="modal-title">Import lama dikesan</span><button class="close-btn" onclick="closeAppModal()">✕</button></div>';
+      html += '<div class="modal-header"><span class="modal-title">Import lama dikesan</span><button class="close-btn" onclick="closeAppModal()" title="Tutup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>';
       html += '<div style="font-size:14px;line-height:1.65;color:var(--ink);">Salinan <strong>' + escapeHtml(book.title) + '</strong> ini datang daripada enjin import lama. Struktur yang sudah hilang—termasuk sempadan Nota Penulis dan Bab 1—tidak boleh dipulihkan daripada teks tersimpan.</div>';
       html += '<div style="margin-top:10px;font-size:13px;color:var(--muted);">Muat naik semula fail PDF atau DOCX asal. Ceritera V7 akan menggantikan salinan lama berdasarkan tajuk atau nama fail sumber secara automatik.</div>';
       html += '<div class="modal-actions"><button type="button" class="btn-cancel" onclick="closeAppModal()">Tutup</button><button type="button" class="btn-lang active" style="flex:1" onclick="closeAppModal();openAddBookModal();">Import Semula</button></div>';
@@ -2341,7 +2390,7 @@ TAMAT`
       pendingImportReport = null;
       pendingImportAudit = null;
       let html = '<div class="modal-overlay" onclick="closeAppModal(event)"><div class="modal" onclick="event.stopPropagation()">';
-      html += '<div class="modal-header"><span class="modal-title">Tambah Buku Baharu</span><button class="close-btn" onclick="closeAppModal()">✕</button></div>';
+      html += '<div class="modal-header"><span class="modal-title">Tambah Buku Baharu</span><button class="close-btn" onclick="closeAppModal()" title="Tutup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>';
       html += '<div id="addBookError"></div>';
       html += '<div class="form-field"><label>Nama Novel</label><input type="text" id="newBookTitle" placeholder="Tajuk buku"></div>';
       html += '<div class="form-field"><label>Nama Penulis</label><input type="text" id="newBookAuthor" placeholder="Nama penulis"></div>';
@@ -3656,7 +3705,7 @@ TAMAT`
       const book = featuredBooks.find(b => b.id === bookId);
       if (!book) return;
       let html = '<div class="modal-overlay" onclick="closeAppModal(event)"><div class="modal" onclick="event.stopPropagation()">';
-      html += '<div class="modal-header"><span class="modal-title">Padam buku?</span><button class="close-btn" onclick="closeAppModal()">✕</button></div>';
+      html += '<div class="modal-header"><span class="modal-title">Padam buku?</span><button class="close-btn" onclick="closeAppModal()" title="Tutup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>';
       html += '<div style="font-size:13.5px;color:var(--muted);margin-bottom:14px;">"' + escapeHtml(book.title) + '" akan dipadam serta semua babnya. Tindakan ini tidak boleh dibatalkan.</div>';
       html += '<div class="modal-actions"><button type="button" class="btn-cancel" onclick="closeAppModal()">Batal</button><button type="button" class="btn-lang active" style="flex:1; background:#c0453d; border-color:#c0453d;" onclick="performDeleteBook(\'' + bookId + '\')">Padam</button></div>';
       html += '</div></div>';
