@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-title" content="Ceritera">
 <meta name="theme-color" content="#e0729f">
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
   :root, [data-theme="koral"]{
     --bg:#ECE6F7;
     --bg-alt:#F4EEFC;
@@ -26,6 +26,7 @@
     --display:'Georgia', 'Times New Roman', serif;
     --sans:'Inter', -apple-system, sans-serif;
     --mono:'JetBrains Mono', ui-monospace, monospace;
+    --headline:'Inter', -apple-system, sans-serif;
   }
   [data-theme="koral"].dark{
     --bg:#262133; --bg-alt:#3C3552; --panel:#322C44; --ink:#EAE4F5; --muted:#AFA3C8;
@@ -192,7 +193,8 @@
     position:relative; z-index:2;
     background:var(--panel);
     border:none;
-    box-shadow:0 8px 16px -10px var(--shadow-d);
+    border-bottom:2.5px solid var(--ink);
+    box-shadow:none;
     padding:20px 28px;
     display:flex; justify-content:space-between; align-items:center;
     flex-wrap:wrap; gap:14px;
@@ -201,19 +203,20 @@
 
   .brand{ display:flex; align-items:center; gap:12px; }
   .brand-mark{
-    width:38px; height:38px; border-radius:50%;
-    background:linear-gradient(135deg, var(--accent), var(--accent2));
+    width:38px; height:38px; border-radius:8px;
+    background:var(--accent);
     display:flex; align-items:center; justify-content:center;
     font-size:1.1rem; flex-shrink:0;
-    box-shadow:var(--sh-out-sm);
+    box-shadow:none;
   }
   h1{
-    font-family:var(--display); font-weight:700; font-size:1.35rem;
-    letter-spacing:-0.01em; color:var(--ink); font-style:italic;
+    font-family:var(--headline); font-weight:900; font-size:1.5rem;
+    letter-spacing:-0.02em; color:var(--ink); font-style:normal;
+    text-transform:uppercase;
   }
   .tagline{
-    font-family:var(--mono); font-size:0.62rem; letter-spacing:0.08em;
-    text-transform:uppercase; color:var(--muted); margin-top:2px;
+    font-family:var(--mono); font-size:0.62rem; letter-spacing:0.12em;
+    text-transform:uppercase; color:var(--accent); margin-top:2px; font-weight:700;
   }
 
   .controls{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
@@ -302,20 +305,23 @@
   .theme-switch input:checked + .theme-switch-track::before{ transform:translateX(20px); }
 
   .auth-page{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; background:var(--bg); }
-  .auth-card{ width:100%; max-width:380px; background:var(--panel); border:none; border-radius:22px; padding:32px 26px; box-shadow:var(--sh-out); }
-  .auth-title{ font-family:var(--display); font-style:italic; font-weight:700; font-size:24px; margin-bottom:4px; text-align:center; }
-  .auth-sub{ font-size:13px; color:var(--muted); text-align:center; margin-bottom:22px; }
+  .auth-card{ width:100%; max-width:380px; background:var(--panel); border:2px solid var(--ink); border-radius:4px; padding:34px 28px; box-shadow:6px 6px 0 var(--accent); }
+  .auth-kicker{ font-family:var(--mono); font-size:0.66rem; font-weight:700; text-transform:uppercase; letter-spacing:0.12em; color:var(--accent); text-align:center; margin-bottom:6px; }
+  .auth-title{ font-family:var(--headline); font-style:normal; font-weight:900; text-transform:uppercase; letter-spacing:-0.02em; font-size:28px; margin-bottom:6px; text-align:center; color:var(--ink); }
+  .auth-sub{ font-size:13px; color:var(--muted); text-align:center; margin-bottom:24px; padding-bottom:18px; border-bottom:1.5px solid var(--line); font-family:var(--sans); }
   .auth-field{ margin-bottom:14px; }
-  .auth-field label{ display:block; font-size:12.5px; font-weight:700; margin-bottom:5px; color:var(--ink); }
-  .auth-field input{ width:100%; padding:11px 13px; border-radius:12px; border:none; font-size:15px; font-family:inherit; background:var(--bg); box-shadow:var(--sh-in-sm); color:var(--ink); box-sizing:border-box; }
-  .auth-btn{ width:100%; padding:12px; border-radius:14px; border:none; background:linear-gradient(135deg, var(--accent), var(--accent2)); color:#fff; font-weight:700; font-size:15px; cursor:pointer; margin-top:6px; box-shadow:var(--sh-out-sm); }
+  .auth-field label{ display:block; font-size:11px; font-weight:700; margin-bottom:5px; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em; font-family:var(--mono); }
+  .auth-field input{ width:100%; padding:11px 13px; border-radius:3px; border:1.5px solid var(--ink); font-size:15px; font-family:inherit; background:var(--bg); box-shadow:none; color:var(--ink); box-sizing:border-box; }
+  .auth-field input:focus{ outline:none; box-shadow:none; border-color:var(--accent); }
+  .auth-btn{ width:100%; padding:13px; border-radius:3px; border:2px solid var(--ink); background:var(--accent); color:#fff; font-weight:800; font-size:14px; text-transform:uppercase; letter-spacing:0.03em; cursor:pointer; margin-top:8px; box-shadow:none; font-family:var(--sans); }
+  .auth-btn:hover{ background:var(--ink); border-color:var(--ink); }
   .auth-btn:disabled{ opacity:0.6; cursor:not-allowed; }
-  .auth-switch{ text-align:center; font-size:13px; margin-top:16px; color:var(--muted); }
+  .auth-switch{ text-align:center; font-size:13px; margin-top:18px; color:var(--muted); font-family:var(--sans); }
   .auth-switch button{ background:none; border:none; color:var(--accent); font-weight:700; cursor:pointer; text-decoration:underline; font-size:13px; }
-  .auth-error{ background:#fdeceb; color:#b3423a; border-radius:10px; padding:9px 12px; font-size:12.5px; margin-bottom:14px; }
-  .auth-note{ background:#fff8e8; color:#8a6d1f; border-radius:10px; padding:9px 12px; font-size:12px; margin-bottom:16px; line-height:1.5; }
-  .auth-skip{ text-align:center; margin-top:10px; }
-  .auth-skip button{ background:none; border:none; color:var(--muted); font-size:12.5px; text-decoration:underline; cursor:pointer; }
+  .auth-error{ background:#fdeceb; color:#b3423a; border:1.5px solid #b3423a; border-radius:3px; padding:9px 12px; font-size:12.5px; margin-bottom:14px; font-family:var(--sans); }
+  .auth-note{ background:#fff8e8; color:#8a6d1f; border:1.5px solid #c9a233; border-radius:3px; padding:9px 12px; font-size:12px; margin-bottom:16px; line-height:1.5; font-family:var(--sans); }
+  .auth-skip{ text-align:center; margin-top:12px; }
+  .auth-skip button{ background:none; border:none; color:var(--muted); font-size:12px; text-decoration:underline; cursor:pointer; text-transform:uppercase; letter-spacing:0.03em; font-family:var(--mono); }
 
   .modal-overlay{ position:fixed; inset:0; background:rgba(0,0,0,0.45); display:flex; align-items:center; justify-content:center; z-index:200; padding:20px; }
   .modal{ width:100%; max-width:520px; max-height:85vh; overflow-y:auto; background:var(--panel); border:none; border-radius:22px; padding:24px; box-shadow:var(--sh-out); }
@@ -335,7 +341,7 @@
   .btn-cancel{ padding:11px 18px; border-radius:12px; border:none; background:var(--panel); box-shadow:var(--sh-out-sm); color:var(--ink); font-weight:600; cursor:pointer; }
   .form-error{ background:#fdeceb; color:#b3423a; border-radius:10px; padding:9px 12px; font-size:12.5px; margin-bottom:14px; }
 
-  .book-card-menu-btn{ position:absolute; top:10px; left:10px; background:var(--panel); border:none; box-shadow:var(--sh-out-sm); border-radius:50%; width:22px; height:22px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:0.72rem; z-index:2; }
+  .book-card-menu-btn{ position:absolute; top:8px; right:8px; background:var(--panel); border:1px solid var(--ink); box-shadow:none; border-radius:3px; width:20px; height:20px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:0.66rem; z-index:2; }
 
   button, select, input[type="text"]{
     padding:9px 15px;
@@ -370,56 +376,96 @@
   .controls-bar{ display:flex; gap:10px; margin-bottom:22px; flex-wrap:wrap; }
   input[type="text"]{ flex-grow:1; }
 
-  /* Book Grid */
+  /* ---- Section masthead (kicker + headline), gaya editorial ---- */
+  .section-kicker{
+    display:flex; align-items:center; gap:10px;
+    font-family:var(--mono); font-size:0.72rem; font-weight:700;
+    text-transform:uppercase; letter-spacing:0.1em; color:var(--muted);
+    margin-bottom:10px;
+  }
+  .section-headline-row{
+    display:flex; justify-content:space-between; align-items:flex-end;
+    gap:24px; flex-wrap:wrap; margin-bottom:18px;
+  }
+  .section-headline{
+    font-family:var(--headline); font-weight:900; text-transform:uppercase;
+    font-size:2.6rem; line-height:0.98; letter-spacing:-0.02em; color:var(--ink);
+  }
+  .section-note{
+    flex:1 1 240px; max-width:340px; font-family:var(--sans); font-size:0.85rem;
+    line-height:1.55; color:var(--muted); border-left:2.5px solid var(--accent);
+    padding-left:14px; margin-bottom:4px;
+  }
+  .section-divider{ height:2px; background:var(--ink); opacity:0.9; margin-bottom:22px; }
+  @media (max-width:640px){
+    .section-headline{ font-size:1.9rem; }
+    .section-note{ border-left:none; padding-left:0; border-top:2px solid var(--accent); padding-top:8px; }
+  }
+
+  /* Book Grid — gaya kad produk majalah */
   .book-grid{
-    display:grid; grid-template-columns:repeat(auto-fill, minmax(148px,1fr));
-    gap:14px;
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(158px,1fr));
+    gap:18px 16px;
     padding-top:6px;
   }
   .book-card{
     background:var(--panel);
-    border:none;
-    border-radius:16px;
-    padding:14px 12px 12px;
+    border:1.5px solid var(--ink);
+    border-radius:4px;
+    padding:0;
     cursor:pointer;
-    display:flex; flex-direction:column; justify-content:space-between;
-    min-height:128px;
-    transition:box-shadow .2s, transform .2s;
+    display:flex; flex-direction:column;
+    min-height:0;
+    transition:transform .15s, box-shadow .15s;
     position:relative;
-    box-shadow:var(--sh-out-sm);
+    box-shadow:none;
+    overflow:hidden;
   }
   .book-card:hover{
-    transform:translateY(-3px);
-    box-shadow:var(--sh-out);
+    transform:translate(-2px,-2px);
+    box-shadow:4px 4px 0 var(--accent);
   }
   .book-card:active{
-    transform:translateY(0);
-    box-shadow:var(--sh-in-sm);
+    transform:translate(0,0);
+    box-shadow:none;
+  }
+  .book-card-cover{
+    position:relative; background:var(--accent-soft);
+    padding:20px 12px 14px; display:flex; align-items:center; justify-content:center;
+    border-bottom:1.5px solid var(--ink); min-height:80px;
   }
   .book-card-icon{
-    font-size:1.5rem; margin-bottom:6px; display:block;
+    font-size:2.1rem; margin:0; display:block;
     filter:drop-shadow(0 2px 3px rgba(0,0,0,0.12));
   }
-  .book-card::after{
-    content:"♡"; position:absolute; top:12px; right:14px;
-    font-size:1rem; color:var(--line); transition:color .2s, transform .2s;
+  .book-card-tagchip{
+    position:absolute; top:8px; left:8px;
+    font-family:var(--mono); font-size:0.58rem; font-weight:700;
+    letter-spacing:0.04em; text-transform:uppercase;
+    background:var(--panel); color:var(--ink);
+    border:1px solid var(--ink); border-radius:3px; padding:2px 6px;
   }
-  .book-card:hover::after{ color:var(--accent); transform:scale(1.15); }
+  .book-card-body{ padding:12px 12px 14px; }
   .book-title{
-    font-family:var(--display); font-weight:700; font-size:0.95rem;
-    margin-bottom:4px; padding-right:16px; line-height:1.25;
+    font-family:var(--headline); font-weight:800; font-size:0.95rem;
+    text-transform:uppercase; letter-spacing:-0.01em;
+    margin-bottom:4px; padding-right:0; line-height:1.15;
   }
-  .book-meta{ font-size:0.72rem; color:var(--muted); font-style:italic; }
+  .book-meta{
+    font-size:0.68rem; color:var(--muted); font-style:normal;
+    font-family:var(--mono); text-transform:uppercase; letter-spacing:0.02em;
+  }
   .book-tag{
-    display:inline-block; margin-top:10px; padding:4px 9px;
-    border-radius:16px; font-size:0.6rem; font-weight:700;
+    display:inline-block; margin-top:10px; padding:0;
+    border-radius:0; font-size:0.6rem; font-weight:700;
     font-family:var(--mono); letter-spacing:0.03em;
-    background:var(--accent-soft); color:var(--accent);
-    align-self:flex-start;
+    background:none; color:var(--accent);
+    align-self:flex-start; text-transform:uppercase;
   }
   @media (max-width:420px){
     .book-grid{ grid-template-columns:repeat(auto-fill, minmax(128px,1fr)); gap:10px; }
-    .book-card{ padding:12px 10px 10px; min-height:112px; border-radius:12px; }
+    .book-card-cover{ padding:14px 10px 10px; min-height:64px; }
+    .book-card-body{ padding:10px 10px 12px; }
   }
 
   /* Pagination */
@@ -432,37 +478,39 @@
   #readerView{ display:none; }
   .reader-nav{
     display:flex; justify-content:space-between; align-items:center;
-    margin-bottom:22px; padding-bottom:14px; border-bottom:1.5px solid var(--line);
+    margin-bottom:22px; padding-bottom:14px; border-bottom:2px solid var(--ink);
     flex-wrap:wrap; gap:10px;
   }
   .reader-header{
-    text-align:center; margin-bottom:28px; padding-bottom:20px;
-    border-bottom:1px dashed var(--line);
+    text-align:left; margin-bottom:22px; padding-bottom:0;
+    border-bottom:none;
   }
   #readerTitle{
-    font-family:var(--display); font-style:italic; font-weight:700;
-    font-size:1.6rem; margin-bottom:8px; color:var(--ink);
+    font-family:var(--headline); font-style:normal; font-weight:900;
+    text-transform:uppercase; letter-spacing:-0.02em;
+    font-size:2rem; line-height:1.02; margin-bottom:8px; color:var(--ink);
   }
-  #readerAuthor{ font-size:0.88rem; color:var(--muted); }
-  .chapter-indicator-wrap{ display:flex; justify-content:center; margin-bottom:18px; }
+  #readerAuthor{ font-size:0.85rem; color:var(--muted); font-family:var(--sans); }
+  .chapter-indicator-wrap{ display:flex; justify-content:flex-start; margin-bottom:12px; }
   .chapter-indicator-box{
     display:inline-flex; align-items:center; gap:10px;
-    background:var(--panel); border:none; border-radius:16px;
-    padding:9px 18px; box-shadow:var(--sh-out-sm);
+    background:none; border:1.5px solid var(--ink); border-radius:3px;
+    padding:5px 12px; box-shadow:none;
   }
   .chapter-indicator-box .chi-num{
-    font-family:var(--display); font-style:italic; font-weight:700;
-    font-size:1.05rem; color:var(--ink); white-space:nowrap;
+    font-family:var(--mono); font-style:normal; font-weight:700;
+    font-size:0.72rem; color:var(--accent); white-space:nowrap;
+    text-transform:uppercase; letter-spacing:0.04em;
   }
-  .chapter-indicator-box .chi-sep{ width:1px; height:16px; background:var(--line); flex-shrink:0; }
+  .chapter-indicator-box .chi-sep{ width:1px; height:12px; background:var(--line); flex-shrink:0; }
   .chapter-indicator-box .chi-of{
-    font-family:var(--sans); font-size:0.72rem; font-weight:700;
-    color:var(--muted); white-space:nowrap;
+    font-family:var(--mono); font-size:0.68rem; font-weight:700;
+    color:var(--muted); white-space:nowrap; text-transform:uppercase; letter-spacing:0.03em;
   }
   @media (max-width:640px){
-    .chapter-indicator-box{ padding:7px 14px; gap:8px; }
-    .chapter-indicator-box .chi-num{ font-size:0.92rem; }
-    .chapter-indicator-box .chi-of{ font-size:0.66rem; }
+    .chapter-indicator-box{ padding:4px 10px; gap:7px; }
+    .chapter-indicator-box .chi-num{ font-size:0.66rem; }
+    .chapter-indicator-box .chi-of{ font-size:0.6rem; }
   }
   /* ---- Pager (mod swipe majalah) ---- */
   .pager-viewport{
@@ -501,19 +549,27 @@
   }
 
   .page-indicator{
-    text-align:center; font-family:var(--sans); font-size:0.76rem;
-    font-weight:600; color:var(--muted); letter-spacing:.03em;
+    text-align:center; font-family:var(--mono); font-size:0.7rem;
+    font-weight:700; color:var(--ink); letter-spacing:.06em; text-transform:uppercase;
     margin:14px 0 4px; user-select:none;
   }
   .swipe-hint{
-    text-align:center; font-family:var(--sans); font-size:0.68rem;
-    color:var(--muted); opacity:.75; margin-bottom:6px; user-select:none;
+    text-align:center; font-family:var(--mono); font-size:0.62rem;
+    color:var(--muted); opacity:.85; margin-bottom:6px; user-select:none;
+    text-transform:uppercase; letter-spacing:.05em;
   }
 
   .chapter-nav-buttons{
     display:flex; justify-content:space-between; margin-top:20px;
-    padding-top:18px; border-top:1.5px solid var(--line);
+    padding-top:18px; border-top:2px solid var(--ink);
   }
+  .chapter-nav-buttons button{
+    border-radius:3px; border:1.5px solid var(--ink); background:var(--panel);
+    text-transform:uppercase; font-family:var(--sans); font-weight:700;
+    font-size:0.74rem; letter-spacing:.02em; box-shadow:none;
+  }
+  .chapter-nav-buttons button:hover{ background:var(--accent); color:#fff; border-color:var(--accent); }
+  .chapter-nav-buttons button:disabled:hover{ background:var(--panel); color:var(--ink); border-color:var(--ink); }
 
   @media (max-width:640px){
     .reader-nav{ margin-bottom:16px; padding-bottom:10px; }
@@ -573,8 +629,8 @@
     main{ max-width:1040px; padding:38px 44px; }
     header{ padding:22px 44px; }
     .book-grid{ grid-template-columns:repeat(auto-fill, minmax(178px,1fr)); gap:22px; }
-    .book-card{ min-height:150px; padding:18px 15px 15px; }
-    .book-card:hover{ transform:translateY(-5px); }
+    .book-card-cover{ min-height:96px; padding:24px 15px 16px; }
+    .book-card:hover{ transform:translate(-3px,-3px); }
     .book-title{ font-size:1.05rem; }
     .theme-modal-grid{ grid-template-columns:repeat(4, 1fr); }
     .modal{ max-width:600px; }
@@ -737,6 +793,13 @@
   <div class="ptr-indicator" id="ptr-indicator"><div class="ptr-spinner" id="ptr-spinner"></div></div>
   <!-- Library View -->
   <section id="libraryView">
+    <div class="section-kicker">— Perpustakaan</div>
+    <div class="section-headline-row">
+      <h2 class="section-headline">Semua<br>Buku</h2>
+      <p class="section-note">Semua buku dalam perpustakaan anda dipaparkan di sini. Buka buku untuk sambung baca dalam mod majalah.</p>
+    </div>
+    <div class="section-divider"></div>
+
     <div class="controls-bar">
       <input type="text" id="searchInput" placeholder="Cari tajuk atau penulis..." oninput="onSearch()">
     </div>
@@ -1865,19 +1928,23 @@ TAMAT`
       if (pageBooks.length === 0) {
         grid.innerHTML = '<p style="grid-column:1/-1; text-align:center; opacity:0.7;">Tiada buku dijumpai.</p>';
       } else {
-        grid.innerHTML = pageBooks.map(book => {
+        grid.innerHTML = pageBooks.map((book, i) => {
           const realIdx = featuredBooks.indexOf(book);
           const flag = book.lang === 'BM' ? '🇲🇾' : '🇬🇧';
           const icon = book.emoji || '📘';
+          const tagCode = (book.id || book.title || 'BK').replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase() + '-' + String(startIdx + i + 1).padStart(2, '0');
           return `
-            <div class="book-card" onclick="openReader(${realIdx})" style="position:relative;">
+            <div class="book-card" onclick="openReader(${realIdx})">
               <button type="button" class="book-card-menu-btn" onclick="event.stopPropagation(); confirmDeleteBook('${book.id}');" title="Padam buku">✕</button>
-              <div>
+              <div class="book-card-cover">
+                <span class="book-card-tagchip">${tagCode}</span>
                 <span class="book-card-icon">${icon}</span>
-                <div class="book-title">${escapeHtml(book.title)}</div>
-                <div class="book-meta">${escapeHtml(book.author)}</div>
               </div>
-              <span class="book-tag">${flag} ${book.lang} &middot; ${getActualChapterCount(book)} bab</span>
+              <div class="book-card-body">
+                <div class="book-meta">${flag} ${book.lang} &middot; ${getActualChapterCount(book)} bab</div>
+                <div class="book-title">${escapeHtml(book.title)}</div>
+                <span class="book-tag">${escapeHtml(book.author)}</span>
+              </div>
             </div>
           `;
         }).join('');
@@ -3949,6 +4016,7 @@ TAMAT`
     function renderAuthScreen(errorMsg) {
       const configured = !!supabaseClient;
       let html = '<div class="auth-page"><div class="auth-card">';
+      html += '<div class="auth-kicker">\u2014 ' + (authMode === 'signup' ? 'Daftar Akaun' : 'Log Masuk') + '</div>';
       html += '<div class="auth-title">Ceritera</div>';
       html += '<div class="auth-sub">Perpustakaan peribadi anda, di mana-mana peranti</div>';
       if (!configured && supabaseLoadError) {
