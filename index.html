@@ -464,40 +464,54 @@
     .chapter-indicator-box .chi-num{ font-size:0.92rem; }
     .chapter-indicator-box .chi-of{ font-size:0.66rem; }
   }
+  /* ---- Pager (mod swipe majalah) ---- */
+  .pager-viewport{
+    position:relative; overflow:hidden; width:100%;
+    -webkit-user-select:text; user-select:text;
+  }
   .reader-content{
     font-family:var(--display); font-size:1.15rem; line-height:1.95;
     white-space:normal; word-break:normal; overflow-wrap:normal;
-    hyphens:none; word-spacing:normal; letter-spacing:normal; margin-bottom:44px; color:var(--ink);
+    hyphens:none; word-spacing:normal; letter-spacing:normal; color:var(--ink);
+    column-gap:0; column-fill:auto;
+    transition:transform .34s cubic-bezier(.22,.61,.36,1);
+    will-change:transform;
   }
+  .reader-content.no-anim{ transition:none; }
   .reader-content *{ word-break:normal; overflow-wrap:normal; hyphens:none; }
   .reader-content p{
     margin:0 0 1.15em;
     white-space:normal; word-break:normal; overflow-wrap:normal;
-  }
-  /* Skip paint/layout work for off-screen reading blocks on modern browsers. */
-  .reader-content > p, .reader-content > h3, .reader-content > h4,
-  .reader-content > ul, .reader-content > blockquote{
-    content-visibility:auto;
-    contain-intrinsic-size:auto 3.2em;
+    break-inside:avoid-column;
   }
   .reader-content h3,
   .reader-content h4{
     font-family:var(--display); line-height:1.35; margin:1.6em 0 .75em;
-    color:var(--ink);
+    color:var(--ink); break-inside:avoid-column; break-after:avoid-column;
   }
   .reader-content h3{ font-size:1.25em; }
   .reader-content h4{ font-size:1.08em; }
   .reader-content ul,
-  .reader-content ol{ margin:.35em 0 1.15em; padding-left:1.55em; }
+  .reader-content ol{ margin:.35em 0 1.15em; padding-left:1.55em; break-inside:avoid-column; }
   .reader-content li{ margin:.32em 0; }
   .reader-content blockquote{
     margin:1em 0 1.25em; padding:.7em 1em;
     border-left:4px solid var(--accent); background:var(--accent-soft);
-    border-radius:0 12px 12px 0;
+    border-radius:0 12px 12px 0; break-inside:avoid-column;
+  }
+
+  .page-indicator{
+    text-align:center; font-family:var(--sans); font-size:0.76rem;
+    font-weight:600; color:var(--muted); letter-spacing:.03em;
+    margin:14px 0 4px; user-select:none;
+  }
+  .swipe-hint{
+    text-align:center; font-family:var(--sans); font-size:0.68rem;
+    color:var(--muted); opacity:.75; margin-bottom:6px; user-select:none;
   }
 
   .chapter-nav-buttons{
-    display:flex; justify-content:space-between; margin-top:32px;
+    display:flex; justify-content:space-between; margin-top:20px;
     padding-top:18px; border-top:1.5px solid var(--line);
   }
 
@@ -506,8 +520,8 @@
     .reader-header{ margin-bottom:18px; padding-bottom:14px; }
     #readerTitle{ font-size:1.25rem; margin-bottom:5px; }
     #readerAuthor{ font-size:0.8rem; }
-    .reader-content{ line-height:1.8; margin-bottom:28px; }
-    .chapter-nav-buttons{ margin-top:22px; padding-top:14px; }
+    .reader-content{ line-height:1.8; }
+    .chapter-nav-buttons{ margin-top:14px; padding-top:14px; }
     .chapter-nav-buttons button{ font-size:0.82rem; padding:9px 12px; }
   }
 
@@ -766,11 +780,15 @@
       </div>
     </div>
 
-    <article class="reader-content" id="readerContent"></article>
+    <div class="pager-viewport" id="pagerViewport">
+      <article class="reader-content" id="readerContent"></article>
+    </div>
+    <div class="page-indicator" id="pageIndicator3">Muka 1 / 1</div>
+    <div class="swipe-hint">‹ leret untuk baca ›</div>
 
     <div class="chapter-nav-buttons">
-      <button id="prevChapBtn" onclick="navigateChapter(-1)">← Bab Sebelumnya</button>
-      <button id="nextChapBtn" onclick="navigateChapter(1)">Bab Seterusnya →</button>
+      <button id="prevChapBtn" onclick="goToAdjacentChapter(-1)">← Bab Sebelumnya</button>
+      <button id="nextChapBtn" onclick="goToAdjacentChapter(1)">Bab Seterusnya →</button>
     </div>
   </section>
 </main>
@@ -1628,6 +1646,10 @@ TAMAT`
     const booksPerPage = 6;
     let currentBookIndex = null;
     let currentChapterIndex = 0;
+    // ---- Mod swipe majalah: state pagination dalam bab semasa ----
+    let currentPageIndex = 0;
+    let totalReaderPages = 1;
+    let pagerPageWidth = 0;
     // Auto-detect a mobile-sized screen at load and start reading at a
     // slightly smaller, better-fitting font size — the person can still
     // adjust with A−/A+ afterwards; this only picks the starting point.
@@ -1994,6 +2016,12 @@ TAMAT`
       if (currentUser && book.id) scheduleCloudProgressSave(book.id, currentChapterIndex);
 
       window.scrollTo({ top: 0, behavior: 'auto' });
+      // Bina semula muka surat majalah untuk bab ini. Lalai mula pada muka
+      // pertama, kecuali _pendingReaderPage diset (cth: masuk dari bab
+      // seterusnya melalui swipe/butang "Bab Sebelumnya").
+      const startPage = (typeof _pendingReaderPage === 'number') ? _pendingReaderPage : 0;
+      _pendingReaderPage = null;
+      requestAnimationFrame(function () { paginateReader(startPage); });
     }
 
     function switchChapter(idxStr) {
@@ -2013,10 +2041,191 @@ TAMAT`
       renderChapter();
     }
 
+    // Guna oleh butang "Bab Sebelumnya / Seterusnya": bila undur ke bab
+    // sebelumnya, mula pada muka SURAT TERAKHIR bab itu supaya aliran
+    // membaca terasa semula jadi (macam majalah).
+    function goToAdjacentChapter(delta) {
+      const book = featuredBooks[currentBookIndex];
+      if (!book || !Array.isArray(book.chapters)) return;
+      const next = currentChapterIndex + delta;
+      if (next < 0 || next >= book.chapters.length) return;
+      _pendingReaderPage = (delta < 0) ? Infinity : 0; // Infinity = muka terakhir, dikira lepas pagination
+      currentChapterIndex = next;
+      renderChapter();
+    }
+    let _pendingReaderPage = null;
+
     function changeFontSize(delta) {
       currentFontSize = Math.max(12, Math.min(32, currentFontSize + delta));
       document.getElementById('readerContent').style.fontSize = currentFontSize + 'px';
+      requestAnimationFrame(function () { paginateReader(0); });
     }
+
+    // ==================== MOD SWIPE MAJALAH (PAGER) ====================
+    // Guna teknik CSS multi-column: kandungan bab "dipecah" automatik
+    // mengikut lebar/tinggi viewport supaya setiap column = satu muka
+    // surat. Navigasi = translateX() viewport sebanyak lebar 1 muka.
+
+    function paginateReader(targetPage) {
+      const viewport = document.getElementById('pagerViewport');
+      const content = document.getElementById('readerContent');
+      if (!viewport || !content) return;
+
+      const width = viewport.clientWidth;
+      if (!width) { totalReaderPages = 1; currentPageIndex = 0; return; }
+
+      // Tinggi 1 muka = ruang menegak yang selesa dibaca tanpa scroll.
+      const topOffset = viewport.getBoundingClientRect().top;
+      const reserved = 190; // ruang untuk penunjuk muka + butang bab + footer
+      let pageHeight = window.innerHeight - topOffset - reserved;
+      pageHeight = Math.max(280, Math.min(pageHeight, 760));
+
+      content.classList.add('no-anim');
+      content.style.transform = 'translateX(0px)';
+      content.style.height = pageHeight + 'px';
+      content.style.columnWidth = width + 'px';
+      content.style.width = width + 'px';
+
+      // Reflow paksa supaya scrollWidth tepat.
+      void content.offsetHeight;
+      pagerPageWidth = width;
+      const scrollW = content.scrollWidth;
+      totalReaderPages = Math.max(1, Math.round(scrollW / width));
+
+      let page = (targetPage === Infinity) ? (totalReaderPages - 1) : (targetPage || 0);
+      page = Math.max(0, Math.min(page, totalReaderPages - 1));
+      currentPageIndex = page;
+
+      content.style.transform = 'translateX(' + (-page * width) + 'px)';
+      // Lepaskan animasi selepas frame seterusnya supaya lompat muka
+      // permulaan tidak "meleret" kelihatan.
+      requestAnimationFrame(function () { content.classList.remove('no-anim'); });
+
+      updatePageIndicatorUI();
+    }
+
+    function updatePageIndicatorUI() {
+      const el = document.getElementById('pageIndicator3');
+      if (el) el.textContent = 'Muka ' + (currentPageIndex + 1) + ' / ' + totalReaderPages;
+      const prevBtn = document.getElementById('prevChapBtn');
+      const nextBtn = document.getElementById('nextChapBtn');
+      const book = featuredBooks[currentBookIndex];
+      if (prevBtn) prevBtn.disabled = (currentChapterIndex <= 0) && (currentPageIndex <= 0);
+      if (nextBtn && book) nextBtn.disabled = (currentChapterIndex >= book.chapters.length - 1) && (currentPageIndex >= totalReaderPages - 1);
+    }
+
+    function goToReaderPage(delta) {
+      const content = document.getElementById('readerContent');
+      if (!content) return;
+      const next = currentPageIndex + delta;
+      if (next < 0) {
+        // Undur ke bab sebelumnya, mula pada muka terakhirnya.
+        if (currentChapterIndex > 0) { goToAdjacentChapter(-1); }
+        return;
+      }
+      if (next >= totalReaderPages) {
+        // Maju ke bab seterusnya, mula pada muka pertama.
+        const book = featuredBooks[currentBookIndex];
+        if (book && currentChapterIndex < book.chapters.length - 1) { goToAdjacentChapter(1); }
+        return;
+      }
+      currentPageIndex = next;
+      content.style.transform = 'translateX(' + (-currentPageIndex * pagerPageWidth) + 'px)';
+      updatePageIndicatorUI();
+    }
+
+    // ---- Gerak isyarat leret (touch) & seret (mouse) ----
+    (function initPagerGestures() {
+      let startX = 0, startY = 0, dragX = 0, dragging = false, intent = null, justDragged = false;
+      const THRESHOLD = 46;
+
+      function onStart(x, y) {
+        const content = document.getElementById('readerContent');
+        if (!content) return;
+        startX = x; startY = y; dragX = 0; dragging = true; intent = null;
+        content.classList.add('no-anim');
+      }
+      function onMove(x, y) {
+        if (!dragging) return;
+        const content = document.getElementById('readerContent');
+        if (!content) return;
+        const dx = x - startX, dy = y - startY;
+        if (!intent) {
+          if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+          intent = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+        }
+        if (intent !== 'h') return;
+        dragX = dx;
+        const base = -currentPageIndex * pagerPageWidth;
+        content.style.transform = 'translateX(' + (base + dragX) + 'px)';
+      }
+      function onEnd() {
+        if (!dragging) return;
+        dragging = false;
+        const content = document.getElementById('readerContent');
+        if (content) content.classList.remove('no-anim');
+        if (intent === 'h') {
+          justDragged = true;
+          if (dragX <= -THRESHOLD) { goToReaderPage(1); }
+          else if (dragX >= THRESHOLD) { goToReaderPage(-1); }
+          else if (content) { content.style.transform = 'translateX(' + (-currentPageIndex * pagerPageWidth) + 'px)'; }
+        }
+        intent = null; dragX = 0;
+      }
+
+      document.addEventListener('touchstart', function (e) {
+        if (!e.target.closest('#pagerViewport')) return;
+        const t = e.touches[0];
+        onStart(t.clientX, t.clientY);
+      }, { passive: true });
+      document.addEventListener('touchmove', function (e) {
+        if (!dragging) return;
+        const t = e.touches[0];
+        onMove(t.clientX, t.clientY);
+        if (intent === 'h') e.preventDefault();
+      }, { passive: false });
+      document.addEventListener('touchend', onEnd);
+      document.addEventListener('touchcancel', onEnd);
+
+      let mouseDown = false;
+      document.addEventListener('mousedown', function (e) {
+        if (!e.target.closest('#pagerViewport')) return;
+        mouseDown = true;
+        onStart(e.clientX, e.clientY);
+      });
+      document.addEventListener('mousemove', function (e) {
+        if (!mouseDown) return;
+        onMove(e.clientX, e.clientY);
+      });
+      document.addEventListener('mouseup', function () {
+        if (!mouseDown) return;
+        mouseDown = false;
+        onEnd();
+      });
+
+      // Tap kiri/kanan pada muka surat (untuk desktop/klik pantas tanpa seret).
+      document.getElementById('mainPage') && document.addEventListener('click', function (e) {
+        const viewport = e.target.closest('#pagerViewport');
+        if (!viewport) return;
+        if (justDragged) { justDragged = false; return; }
+        const rect = viewport.getBoundingClientRect();
+        const relX = e.clientX - rect.left;
+        if (relX < rect.width * 0.32) goToReaderPage(-1);
+        else if (relX > rect.width * 0.68) goToReaderPage(1);
+      });
+
+      window.addEventListener('resize', function () {
+        if (document.getElementById('readerView').style.display !== 'none') {
+          paginateReader(currentPageIndex);
+        }
+      });
+
+      document.addEventListener('keydown', function (e) {
+        if (document.getElementById('readerView').style.display === 'none') return;
+        if (e.key === 'ArrowRight') goToReaderPage(1);
+        else if (e.key === 'ArrowLeft') goToReaderPage(-1);
+      });
+    })();
 
     // ==================== FOCUS MODE ====================
     function enterFocusMode() {
@@ -2040,10 +2249,12 @@ TAMAT`
     document.addEventListener('fullscreenchange', () => {
       const btn = document.getElementById('exitFocusBtn');
       if (btn) btn.style.display = document.fullscreenElement ? 'block' : 'none';
+      requestAnimationFrame(function () { paginateReader(currentPageIndex); });
     });
     document.addEventListener('webkitfullscreenchange', () => {
       const btn = document.getElementById('exitFocusBtn');
       if (btn) btn.style.display = document.webkitFullscreenElement ? 'block' : 'none';
+      requestAnimationFrame(function () { paginateReader(currentPageIndex); });
     });
 
     // ==================== BOOKMARK ====================
